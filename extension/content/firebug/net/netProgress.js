@@ -129,7 +129,7 @@ NetProgress.prototype =
         }
     },
 
-    requestedHeaderFile: function requestedHeaderFile(request, time, win, xhr, extraStringData)
+    requestedHeaderFile: function requestedHeaderFile(request, time, win, xhr, extraStringData, timestamp)
     {
         var file = this.getRequestFile(request);
         if (file)
@@ -139,6 +139,16 @@ NetProgress.prototype =
             file.requestHeadersText = extraStringData;
 
             this.requestedFile(request, time, win, xhr);
+
+            // Debugging purposes, see issue 5125
+            if (!file._startTime)
+                file._startTime = [];
+
+            file._startTime.push({
+                timestamp: timestamp,
+                time: time,
+                now: NetUtils.now()
+            });
 
             Events.dispatch(Firebug.NetMonitor.fbListeners, "onRequest", [this.context, file]);
         }
@@ -933,7 +943,8 @@ NetProgress.prototype =
 function logTime(file, title, time)
 {
     // xxxHonza: just for debugging purposes.
-    return;
+    // see issue 5125
+    //return;
 
     if (!file._timings)
         file._timings = {counter: 0};

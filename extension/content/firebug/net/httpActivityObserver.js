@@ -196,7 +196,7 @@ var NetHttpActivityObserver =
                 activeRequests.push(win);
 
                 var isXHR = Http.isXHR(httpChannel);
-                networkContext.post(requestedHeaderFile, [httpChannel, time, win, isXHR, extraStringData]);
+                networkContext.post(requestedHeaderFile, [httpChannel, time, win, isXHR, extraStringData, timestamp]);
             }
             else if (activitySubtype == nsIHttpActivityObserver.ACTIVITY_SUBTYPE_TRANSACTION_CLOSE)
             {
