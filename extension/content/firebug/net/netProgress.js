@@ -142,13 +142,16 @@ NetProgress.prototype =
 
             // Debugging purposes, see issue 5125
             if (!file._startTime)
-                file._startTime = [];
+                file._startTime = {};
 
-            file._startTime.push({
-                timestamp: timestamp,
-                time: time,
-                now: NetUtils.now()
-            });
+            file._startTime.timestamp = timestamp;
+            file._startTime.time = time;
+            file._startTime.now = NetUtils.now();
+
+            // Convert to string
+            file._startTime.timestampDate = new Date(timestamp/1000) + "";
+            file._startTime.timeDate = new Date(time) + "";
+            file._startTime.nowDate = new Date(NetUtils.now()) + "";
 
             Events.dispatch(Firebug.NetMonitor.fbListeners, "onRequest", [this.context, file]);
         }
