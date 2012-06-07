@@ -21,15 +21,16 @@ define([
     "firebug/lib/persist",
     "firebug/lib/system",
     "firebug/chrome/menu",
+    "firebug/lib/options",
+    "firebug/css/cssModule",
     "firebug/css/cssReps",
     "firebug/editor/editor",
     "firebug/editor/editorSelector",
-    "firebug/chrome/searchBox",
-    "firebug/css/cssModule",
+    "firebug/chrome/searchBox"
 ],
 function(Obj, Firebug, Domplate, FirebugReps, Locale, Events, Wrapper, Url,
     SourceLink, Css, Dom, Win, Search, Str, Arr, Fonts, Xml, Persist, System, Menu,
-    CSSInfoTip) {
+    Options, CSSModule, CSSInfoTip) {
 
 with (Domplate) {
 
@@ -62,13 +63,13 @@ var CSSPropTag = domplate(CSSDomplateBase,
             $cssOverridden: "$prop.overridden",
             role: "option"},
 
-            // Use spaces for indent so, copy to clipboard is nice.
+            // Use spaces for indent to make "copy to clipboard" nice.
             SPAN("&nbsp;&nbsp;&nbsp;&nbsp;"),
             SPAN({"class": "cssPropName", $editable: "$rule|isEditable"},
                 "$prop.name"
             ),
 
-            // Use space here so, copy to clipboard has it (3266).
+            // Use a space here, so that "copy to clipboard" has it (issue 3266).
             SPAN({"class": "cssColon"}, ":&nbsp;"),
             SPAN({"class": "cssPropValue", $editable: "$rule|isEditable"},
                 "$prop.value$prop.important"
@@ -288,7 +289,7 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
         if (this.editing)
         {
             this.stopEditing();
-            Events.dispatch(this.fbListeners, 'onStopCSSEditing', [this.context]);
+            Events.dispatch(this.fbListeners, "onStopCSSEditing", [this.context]);
         }
         else
         {
@@ -299,19 +300,19 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
                 ? this.location.editStyleSheet.sheet
                 : this.location;
 
-            this.currentCSSEditor = Firebug.CSSModule.getCurrentEditor();
+            this.currentCSSEditor = CSSModule.getCurrentEditor();
             try
             {
                 this.currentCSSEditor.startEditing(styleSheet, this.context, this);
-                Events.dispatch(this.fbListeners, 'onStartCSSEditing', [styleSheet, this.context]);
+                Events.dispatch(this.fbListeners, "onStartCSSEditing", [styleSheet, this.context]);
             }
             catch(exc)
             {
-                var mode = Firebug.CSSModule.getCurrentEditorName();
+                var mode = CSSModule.getCurrentEditorName();
                 if (FBTrace.DBG_ERRORS)
                     FBTrace.sysout("editor.startEditing ERROR "+exc, {exc: exc, name: mode,
                         currentEditor: this.currentCSSEditor, styleSheet: styleSheet,
-                        CSSModule:Firebug.CSSModule});
+                        CSSModule: CSSModule});
             }
         }
     },
@@ -539,7 +540,11 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
         name = this.translateName(name, value);
         if (name)
         {
-            value = Css.stripUnits(Css.rgbToHex(value));
+            if (Options.get("colorDisplay") == "hex")
+                value = Css.rgbToHex(value);
+            else if (Options.get("colorDisplay") == "hsl")
+                value = Css.rgbToHSL(value);
+            value = Css.stripUnits(value);
             important = important ? " !important" : "";
 
             var prop = {name: name, value: value, important: important, disabled: disabled};
@@ -653,7 +658,7 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
     {
         var rule = Firebug.getRepObject(row);
         var propName = Dom.getChildByClass(row, "cssPropName").textContent;
-        Firebug.CSSModule.deleteProperty(rule, propName, this.context);
+        CSSModule.deleteProperty(rule, propName, this.context);
 
         // Remove the property from the selector map, if it was disabled
         var ruleId = Firebug.getRepNode(row).getAttribute("ruleId");
@@ -671,7 +676,7 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
         }
 
         if (this.name == "stylesheet")
-            Events.dispatch(this.fbListeners, 'onInlineEditorClose', [this, row.firstChild, true]);
+            Events.dispatch(this.fbListeners, "onInlineEditorClose", [this, row.firstChild, true]);
         row.parentNode.removeChild(row);
 
         this.markChange(this.name == "stylesheet");
@@ -696,7 +701,7 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
         var propValue = Dom.getChildByClass(row, "cssPropValue").textContent;
         var parsedValue = parsePriority(propValue);
 
-        Firebug.CSSModule.disableProperty(Css.hasClass(row, "disabledStyle"), rule,
+        CSSModule.disableProperty(Css.hasClass(row, "disabledStyle"), rule,
             propName, parsedValue, map, this.context);
 
         this.markChange(this.name == "stylesheet");
@@ -792,7 +797,7 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
 
         this.showToolbarButtons("fbCSSButtons", true);
 
-        Firebug.CSSModule.updateEditButton();
+        CSSModule.updateEditButton();
 
         // wait for loadedContext to restore the panel
         if (this.context.loaded && !this.location)
@@ -945,7 +950,7 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
 
     updateOption: function(name, value)
     {
-        if (name == "expandShorthandProps")
+        if (name == "expandShorthandProps" || name == "colorDisplay")
             this.refresh();
     },
 
@@ -957,16 +962,23 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
 
     getOptionsMenuItems: function()
     {
-        return [
-            Menu.optionMenu("Expand_Shorthand_Properties", "expandShorthandProps",
-                "css.option.tip.Expand_Shorthand_Properties"),
+        items = [
+             Menu.optionMenu("Expand_Shorthand_Properties", "expandShorthandProps",
+             "css.option.tip.Expand_Shorthand_Properties")
+        ];
+
+        items = Arr.extendArray(items, CSSModule.getColorDisplayOptionMenuItems());
+
+        items.push(
             "-",
             {
                 label: "Refresh",
                 tooltiptext: "panel.tip.Refresh",
                 command: Obj.bind(this.refresh, this)
             }
-        ];
+        );
+
+        return items;
     },
 
     getContextMenuItems: function(style, target)
@@ -1154,11 +1166,11 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
                 if (text.charAt(rangeOffset) == ",")
                     return;
 
-                cssValue = Firebug.CSSModule.parseCSSFontFamilyValue(text, rangeOffset, propName);
+                cssValue = CSSModule.parseCSSFontFamilyValue(text, rangeOffset, propName);
             }
             else
             {
-                cssValue = Firebug.CSSModule.parseCSSValue(text, rangeOffset);
+                cssValue = CSSModule.parseCSSValue(text, rangeOffset);
             }
 
             if (!cssValue)
@@ -1185,9 +1197,9 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
                     {
                         var rule = Firebug.getRepObject(target);
                         var baseURL = this.getStylesheetURL(rule, true);
-                        var relURL = Firebug.CSSModule.parseURLValue(cssValue.value);
+                        var relURL = CSSModule.parseURLValue(cssValue.value);
                         var absURL = Url.isDataURL(relURL) ? relURL : Url.absoluteURL(relURL, baseURL);
-                        var repeat = Firebug.CSSModule.parseRepeatValue(text);
+                        var repeat = CSSModule.parseRepeatValue(text);
 
                         this.infoTipType = "image";
                         this.infoTipObject = absURL;
@@ -1459,7 +1471,7 @@ Firebug.CSSStyleSheetPanel.prototype = Obj.extend(Firebug.Panel,
                 {styleSheet: styleSheet, ruleIndex: ruleIndex});
         }
 
-        Firebug.CSSModule.deleteRule(styleSheet, ruleIndex);
+        CSSModule.deleteRule(styleSheet, ruleIndex);
 
         if (this.context.panelName == "stylesheet")
         {
@@ -1559,19 +1571,19 @@ CSSEditor.prototype = domplate(Firebug.InlineEditor.prototype,
                                 " = " + propValue);
   
                         if (previousValue)
-                            Firebug.CSSModule.removeProperty(rule, previousValue);
+                            CSSModule.removeProperty(rule, previousValue);
   
-                        Firebug.CSSModule.setProperty(rule, value, parsedValue.value,
+                        CSSModule.setProperty(rule, value, parsedValue.value,
                             parsedValue.priority);
                     }
   
-                    Events.dispatch(this.fbListeners, "onCSSPropertyNameChanged", [rule, value,
+                    Events.dispatch(CSSModule.fbListeners, "onCSSPropertyNameChanged", [rule, value,
                         previousValue, baseText]);
                 }
                 else if (!value)
                 {
                     // name of the property has been deleted, so remove the property.
-                    Firebug.CSSModule.removeProperty(rule, previousValue);
+                    CSSModule.removeProperty(rule, previousValue);
                 }
             }
             else if (Dom.getAncestorByClass(target, "cssPropValue"))
@@ -1589,12 +1601,12 @@ CSSEditor.prototype = domplate(Firebug.InlineEditor.prototype,
                 if (value && value != "null")
                 {
                     parsedValue = parsePriority(value);
-                    Firebug.CSSModule.setProperty(rule, propName, parsedValue.value,
+                    CSSModule.setProperty(rule, propName, parsedValue.value,
                         parsedValue.priority);
                 }
                 else if (previousValue && previousValue != "null")
                 {
-                    Firebug.CSSModule.removeProperty(rule, propName);
+                    CSSModule.removeProperty(rule, propName);
                 }
             }
   
@@ -1661,7 +1673,7 @@ CSSEditor.prototype = domplate(Firebug.InlineEditor.prototype,
         }
         else if (charCode == 59 /*";"*/ && Css.hasClass(target, "cssPropValue"))
         {
-            var cssValue = Firebug.CSSModule.parseCSSValue(this.input.value, this.input.selectionStart);
+            var cssValue = CSSModule.parseCSSValue(this.input.value, this.input.selectionStart);
             // Simple test, if we are inside a string (see issue 4543)
             var isValueInString = (cssValue.value.indexOf("\"") != -1);
 
@@ -1679,9 +1691,9 @@ CSSEditor.prototype = domplate(Firebug.InlineEditor.prototype,
         var propRow = Dom.getAncestorByClass(this.target, "cssProp");
         var propName = Dom.getChildByClass(propRow, "cssPropName").textContent.toLowerCase();
         if (propName == "font" || propName == "font-family")
-            return Firebug.CSSModule.parseCSSFontFamilyValue(value, offset, propName);
+            return CSSModule.parseCSSFontFamilyValue(value, offset, propName);
         else
-            return Firebug.CSSModule.parseCSSValue(value, offset);
+            return CSSModule.parseCSSValue(value, offset);
     },
 
     getAutoCompleteList: function(preExpr, expr, postExpr, range, cycle)
@@ -1724,7 +1736,7 @@ CSSEditor.prototype = domplate(Firebug.InlineEditor.prototype,
                     var fonts = Fonts.getFontsUsedInContext(this.panel.context), ar = [];
                     for (var i = 0; i < fonts.length; i++)
                         ar.push(fonts[i].CSSFamilyName);
-                    keywords = Arr.merge(keywords, ar);
+                    keywords = Arr.sortUnique(keywords.concat(ar));
                 }
 
                 var q = expr.charAt(0), isQuoted = (q === '"' || q === "'");
@@ -1830,7 +1842,7 @@ CSSEditor.prototype = domplate(Firebug.InlineEditor.prototype,
             propName = Dom.getChildByClass(propRow, "cssPropName").textContent;
         }
 
-        var range = Firebug.CSSModule.parseCSSValue(value, offset);
+        var range = CSSModule.parseCSSValue(value, offset);
         var type = (range && range.type) || "";
         var expr = (range ? value.substring(range.start, range.end) : "");
 
@@ -2090,7 +2102,7 @@ CSSRuleEditor.prototype = domplate(Firebug.InlineEditor.prototype,
         // We want to do this before the insert to ease change tracking
         if (oldRule)
         {
-            Firebug.CSSModule.deleteRule(styleSheet, ruleIndex);
+            CSSModule.deleteRule(styleSheet, ruleIndex);
         }
 
         // Firefox does not follow the spec for the update selector text case.
@@ -2120,7 +2132,7 @@ CSSRuleEditor.prototype = domplate(Firebug.InlineEditor.prototype,
 
             try
             {
-                var insertLoc = Firebug.CSSModule.insertRule(styleSheet, cssText, ruleIndex);
+                var insertLoc = CSSModule.insertRule(styleSheet, cssText, ruleIndex);
                 rule = cssRules[insertLoc];
                 ruleIndex++;
 
@@ -2138,7 +2150,7 @@ CSSRuleEditor.prototype = domplate(Firebug.InlineEditor.prototype,
 
                 target.innerHTML = Str.escapeForCss(previousValue);
                 // create dummy rule to be able to recover from error
-                var insertLoc = Firebug.CSSModule.insertRule(styleSheet,
+                var insertLoc = CSSModule.insertRule(styleSheet,
                     'selectorSavingError{}', ruleIndex);
                 rule = cssRules[insertLoc];
 
@@ -2268,7 +2280,7 @@ CSSRuleEditor.prototype = domplate(Firebug.InlineEditor.prototype,
                     if (e.id)
                         ids.push(e.id);
                 });
-                ids = Arr.merge(ids, []);
+                ids = Arr.sortUnique(ids);
                 ret.push.apply(ret, ids.map(function(cl)
                 {
                     return "#" + cl;
@@ -2287,7 +2299,7 @@ CSSRuleEditor.prototype = domplate(Firebug.InlineEditor.prototype,
                         classes.push.apply(classes, e.classList);
                     }
                 });
-                classes = Arr.merge(classes, []);
+                classes = Arr.sortUnique(classes);
                 ret.push.apply(ret, classes.map(function(cl)
                 {
                     return "." + cl;
@@ -2432,7 +2444,7 @@ StyleSheetEditor.prototype = domplate(Firebug.BaseEditor,
         if (FBTrace.DBG_CSS)
             FBTrace.sysout("StyleSheetEditor.saveEdit", arguments);
 
-        Firebug.CSSModule.freeEdit(this.styleSheet, value);
+        CSSModule.freeEdit(this.styleSheet, value);
     },
 
     beginEditing: function()
