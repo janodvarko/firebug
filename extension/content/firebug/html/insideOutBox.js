@@ -96,6 +96,7 @@ Firebug.InsideOutBox.prototype =
     {
         if (FBTrace.DBG_HTML)
             FBTrace.sysout("insideOutBox.select object:"+object, object);
+
         var objectBox = this.createObjectBox(object);
         this.selectObjectBox(objectBox, forceOpen);
 
@@ -202,7 +203,7 @@ Firebug.InsideOutBox.prototype =
                 Css.setClass(parentBox, "open");
                 labelBox = parentBox.getElementsByClassName("nodeLabelBox").item(0);
                 if (labelBox)
-                    labelBox.setAttribute("aria-expanded", "true")
+                    labelBox.setAttribute("aria-expanded", "true");
             }
         }
     },
@@ -263,13 +264,13 @@ Firebug.InsideOutBox.prototype =
         if (labelBox)
             labelBox.setAttribute("aria-expanded", "false");
 
-        // Recursively contract all child boxes
-        var nodeChildBox = this.getChildObjectBox(objectBox);
-        if (!nodeChildBox)
-            return;
-
         if (contractAll)
         {
+            // Recursively contract all child boxes
+            var nodeChildBox = this.getChildObjectBox(objectBox);
+            if (!nodeChildBox)
+                return;
+
             for (var child = nodeChildBox.firstChild; child; child = child.nextSibling)
             {
                 if (Css.hasClass(child, "containerNodeBox") && Css.hasClass(child, "open"))
@@ -300,6 +301,13 @@ Firebug.InsideOutBox.prototype =
     getPreviousObjectBox: function(objectBox)
     {
         return Dom.findPrevious(objectBox, isVisibleTarget, true, this.box);
+    },
+
+    getNextSiblingObjectBox: function(objectBox)
+    {
+        if (!objectBox)
+            return null;
+        return Dom.findNext(objectBox, isVisibleTarget, true, objectBox.parentNode);
     },
 
     /**
@@ -524,7 +532,7 @@ Firebug.InsideOutBox.prototype =
                 if (newBox)
                 {
                     if (!nodeChildBox)
-                        FBTrace.sysout("insideOutBox FAILS no nodeChildBox "+repObject, repObject)
+                        FBTrace.sysout("insideOutBox FAILS no nodeChildBox "+repObject, repObject);
 
                     if (lastSiblingBox)
                     {

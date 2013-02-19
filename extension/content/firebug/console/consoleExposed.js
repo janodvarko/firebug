@@ -195,6 +195,7 @@ function createFirebugConsole(context, win)
     console.timeEnd = function(name)
     {
         var time = new Date().getTime();
+        var diff = undefined;
 
         if (!this.timeCounters)
             return Console.getDefaultReturnValue(win);
@@ -204,7 +205,7 @@ function createFirebugConsole(context, win)
         var timeCounter = this.timeCounters[key];
         if (timeCounter)
         {
-            var diff = time - timeCounter;
+            diff = time - timeCounter;
             var label = name + ": " + diff + "ms";
 
             this.info(label);
@@ -249,7 +250,8 @@ function createFirebugConsole(context, win)
         }
     };
 
-    console.memoryProfile = function(title)
+    // xxxHonza: removed from 1.10 (issue 5599)
+    /*console.memoryProfile = function(title)
     {
         Firebug.MemoryProfiler.start(context, title);
         return Console.getDefaultReturnValue(win);
@@ -259,7 +261,7 @@ function createFirebugConsole(context, win)
     {
         Firebug.MemoryProfiler.stop(context);
         return Console.getDefaultReturnValue(win);
-    };
+    };*/
 
     // Expose only these properties to the content scope (read only).
     console.__exposedProps__.log = "r";
@@ -283,8 +285,8 @@ function createFirebugConsole(context, win)
     console.__exposedProps__.clear = "r";
     console.__exposedProps__.table = "r";
     console.__exposedProps__.error = "r";
-    console.__exposedProps__.memoryProfile = "r";
-    console.__exposedProps__.memoryProfileEnd = "r";
+    //console.__exposedProps__.memoryProfile = "r";
+    //console.__exposedProps__.memoryProfileEnd = "r";
 
     // DBG console.uid = Math.random();
 
@@ -293,7 +295,7 @@ function createFirebugConsole(context, win)
 
     function logFormatted(args, className, linkToSource, noThrottle)
     {
-        var sourceLink;
+        var sourceLink = null;
 
         // Using JSD to get user stack is time consuming.
         if (Options.get("preferJSDSourceLinks"))
@@ -315,33 +317,31 @@ function createFirebugConsole(context, win)
     {
         Errors.increaseCount(context);
 
-        if (!args || !args.length || args.length == 0)
-            var msg = [Locale.$STR("Assertion")];
-        else
-            var msg = args[0];
+        var msg = (!args || !args.length || args.length == 0) ?
+            [Locale.$STR("Assertion")] : args[0];
 
         // If there's no error message, there's also no stack trace. See Issue 4700.
-        if (!msg)
+        var trace = null;
+        if (msg)
         {
-            var trace = null;
-        }
-        else if (msg.stack)
-        {
-            var trace = StackFrame.parseToStackTrace(msg.stack, context);
-            if (FBTrace.DBG_CONSOLE)
-                FBTrace.sysout("logAssert trace from msg.stack", trace);
-        }
-        else if (context.stackTrace)
-        {
-            var trace = context.stackTrace;
-            if (FBTrace.DBG_CONSOLE)
-                FBTrace.sysout("logAssert trace from context.window.stackTrace", trace);
-        }
-        else
-        {
-            var trace = getJSDUserStack();
-            if (FBTrace.DBG_CONSOLE)
-                FBTrace.sysout("logAssert trace from getJSDUserStack", trace);
+            if (msg.stack)
+            {
+                trace = StackFrame.parseToStackTrace(msg.stack, context);
+                if (FBTrace.DBG_CONSOLE)
+                    FBTrace.sysout("logAssert trace from msg.stack", trace);
+            }
+            else if (context.stackTrace)
+            {
+                trace = context.stackTrace;
+                if (FBTrace.DBG_CONSOLE)
+                    FBTrace.sysout("logAssert trace from context.window.stackTrace", trace);
+            }
+            else
+            {
+                trace = getJSDUserStack();
+                if (FBTrace.DBG_CONSOLE)
+                    FBTrace.sysout("logAssert trace from getJSDUserStack", trace);
+            }
         }
 
         trace = StackFrame.cleanStackTraceOfFirebug(trace);
@@ -360,7 +360,7 @@ function createFirebugConsole(context, win)
 
         if (args.length > 1)
         {
-            errorObject.objects = []
+            errorObject.objects = [];
             for (var i = 1; i < args.length; i++)
                 errorObject.objects.push(args[i]);
         }

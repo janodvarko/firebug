@@ -1,17 +1,19 @@
 /* See license.txt for terms of usage */
 
-FBTestApp.ns( /** @scope _testLogger_ */ function() { with (FBL) {
+define([
+    "firebug/lib/trace",
+],
+function(FBTrace) {
 
-// ************************************************************************************************
-// Test Logger Implementation
+// ********************************************************************************************* //
+// Constants
 
 var Cc = Components.classes;
 var Ci = Components.interfaces;
 
-// ************************************************************************************************
+// ********************************************************************************************* //
 
-/** @namespace */
-FBTestApp.TestLogger =
+var TestLogger =
 {
     getDefaultFile: function(date)
     {
@@ -77,14 +79,14 @@ FBTestApp.TestLogger =
         {
             // Create default folder for automated logs.
             var dirService = Cc["@mozilla.org/file/directory_service;1"].getService(Ci.nsIProperties);
-            var dir = dirService.get("ProfD", Ci.nsILocalFile);
+            var dir = dirService.get("ProfD", Ci.nsIFile);
             dir.append("firebug");
             dir.append("fbtest");
             dir.append("logs");
         }
         else
         {
-            dir = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+            dir = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
             dir.initWithPath(path);
         }
 
@@ -92,28 +94,27 @@ FBTestApp.TestLogger =
     }
 };
 
-// ************************************************************************************************
+// ********************************************************************************************* //
 // Test Runner Progress Listener
 
-/** @class */
-FBTestApp.TestLogger.ProgressListener = function(date)
+TestLogger.ProgressListener = function(date)
 {
     this.startedTime = date;
 };
 
-FBTestApp.TestLogger.ProgressListener.prototype =
+TestLogger.ProgressListener.prototype =
 {
     onTestSuiteStart: function(tests)
     {
         if (FBTrace.DBG_FBTEST)
             FBTrace.sysout("fbtrace.ProgressListener; onTestSuiteStart " + tests.length, tests);
 
-        this.stream = FBTestApp.TestLogger.getOutputStream(this.startedTime);
+        this.stream = TestLogger.getOutputStream(this.startedTime);
         if (!this.stream)
             return;
 
         // Log system configuration
-        var info = FBTestApp.TestLogger.getSystemInfo();
+        var info = TestLogger.getSystemInfo();
         this.stream.writeString("FIREBUG INFO | Firebug: " + info.firebug + "\n");
         this.stream.writeString("FIREBUG INFO | FBTest: " + info.fbTest + "\n");
         this.stream.writeString("FIREBUG INFO | App Name: " + info.appName + "\n");
@@ -141,7 +142,8 @@ FBTestApp.TestLogger.ProgressListener.prototype =
 
         // Log summary
         this.stream.writeString("\n");
-        this.stream.writeString("FIREBUG INFO | Test Suite Finished: " + (new Date()).toGMTString() + "\n");
+        this.stream.writeString("FIREBUG INFO | Test Suite Finished: " +
+            (new Date()).toGMTString() + "\n");
         this.stream.writeString("FIREBUG INFO | Passing: " + passingTests.passing + "\n");
         this.stream.writeString("FIREBUG INFO | Failing: " + passingTests.failing + "\n");
 
@@ -193,5 +195,10 @@ FBTestApp.TestLogger.ProgressListener.prototype =
     }
 };
 
-// ************************************************************************************************
-}});
+// ********************************************************************************************* //
+// Registration
+
+return TestLogger;
+
+// ********************************************************************************************* //
+});

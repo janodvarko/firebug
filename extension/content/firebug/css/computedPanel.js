@@ -97,7 +97,7 @@ CSSComputedPanel.prototype = Obj.extend(Firebug.Panel,
                                 _repObject: "$selector"},
                             TD({"class": "selectorName", role: "presentation"},
                                 "$selector.selector.text"),
-                            TD({role: "presentation"},
+                            TD({"class": "propValue", role: "presentation"},
                                 SPAN({"class": "stylePropValue"}, "$selector.value|formatValue")),
                             TD({"class": "styleSourceLink", role: "presentation"},
                                 TAG(FirebugReps.SourceLink.tag, {object: "$selector|getSourceLink"})
@@ -142,6 +142,10 @@ CSSComputedPanel.prototype = Obj.extend(Firebug.Panel,
             else if (Options.get("colorDisplay") == "hsl")
                 value = Css.rgbToHSL(value);
 
+            var limit = Options.get("stringCropLength");
+            if (limit > 0)
+                value = Str.cropString(value, limit);
+
             // Add a zero-width space after a comma to allow line breaking
             return value.replace(/,/g, ",\u200B");
         }
@@ -151,16 +155,54 @@ CSSComputedPanel.prototype = Obj.extend(Firebug.Panel,
 
     updateComputedView: function(element)
     {
+        // The current selection can be null.
+        if (!element)
+            return;
+
+        var doc = element.ownerDocument;
+        var win = doc.defaultView;
+
+        // Update now if the document is loaded, otherwise wait for "load" event.
+        if (doc.readyState == "complete")
+            return this.doUpdateComputedView(element);
+
+        if (this.updateInProgress)
+            return;
+
+        var self = this;
+        var onWindowLoadHandler = function()
+        {
+            self.context.removeEventListener(win, "load", onWindowLoadHandler, true);
+            self.updateInProgress = false;
+            self.doUpdateComputedView(element);
+        };
+
+        this.context.addEventListener(win, "load", onWindowLoadHandler, true);
+        this.updateInProgress = true;
+    },
+
+    doUpdateComputedView: function(element)
+    {
         function isUnwantedProp(propName)
         {
-            return !Firebug.showMozillaSpecificStyles && Str.hasPrefix(propName, "-moz")
+            return !Firebug.showMozillaSpecificStyles && Str.hasPrefix(propName, "-moz");
         }
 
         var win = element.ownerDocument.defaultView;
         var computedStyle = win.getComputedStyle(element);
 
-        if (this.cssLogic)
-            this.cssLogic.highlight(element);
+        try
+        {
+            if (this.cssLogic)
+                this.cssLogic.highlight(element);
+        }
+        catch (e)
+        {
+            // An exception is thrown if the document is not fully loaded yet
+            // The cssLogic API needs to be used after "load" has been fired.
+            if (FBTrace.DBG_ERRORS)
+                FBTrace.sysout("computedPanel.doUpdateComputedView; EXCEPTION " + e, e);
+        }
 
         var props = [];
         for (var i = 0; i < computedStyle.length; ++i)
@@ -257,6 +299,12 @@ CSSComputedPanel.prototype = Obj.extend(Firebug.Panel,
         {
             FirebugReps.Warning.tag.replace({object: "computed.No_User-Defined_Styles"},
                 this.panelNode);
+        }
+
+        if (this.scrollTop)
+        {
+            this.panelNode.scrollTop = this.scrollTop;
+            delete this.scrollTop;
         }
 
         Events.dispatch(this.fbListeners, "onCSSRulesAdded", [this, result]);
@@ -399,13 +447,12 @@ CSSComputedPanel.prototype = Obj.extend(Firebug.Panel,
         // Wait for loadedContext to restore the panel
         if (this.context.loaded)
         {
-            var state;
             Persist.restoreObjects(this, state);
 
             if (state)
             {
                 if (state.scrollTop)
-                    this.panelNode.scrollTop = state.scrollTop;
+                    this.scrollTop = state.scrollTop;
 
                 if (state.groupOpened)
                     this.groupOpened = state.groupOpened;
@@ -446,15 +493,13 @@ CSSComputedPanel.prototype = Obj.extend(Firebug.Panel,
 
     updateOption: function(name, value)
     {
-        var options = [
-            "showUserAgentCSS",
-            "computedStylesDisplay",
-            "colorDisplay",
-            "showMozillaSpecificStyles"
-        ];
+        var options = new Set();
+        options.add("showUserAgentCSS");
+        options.add("computedStylesDisplay");
+        options.add("colorDisplay");
+        options.add("showMozillaSpecificStyles");
 
-        var isRefreshOption = function(element) { return element == name; };
-        if (options.some(isRefreshOption))
+        if (options.has(name))
             this.refresh();
     },
 
@@ -629,6 +674,7 @@ CSSComputedPanel.prototype = Obj.extend(Firebug.Panel,
 
                         return CSSInfoTip.populateImageInfoTip(infoTip, absURL, repeat);
                     }
+                    break;
 
                 case "fontFamily":
                     return CSSInfoTip.populateFontFamilyInfoTip(infoTip, cssValue.value);
@@ -637,6 +683,8 @@ CSSComputedPanel.prototype = Obj.extend(Firebug.Panel,
             delete this.infoTipType;
             delete this.infoTipValue;
             delete this.infoTipObject;
+
+            return false;
         }
     },
 
@@ -799,8 +847,8 @@ const styleGroups =
         "overflow-x",  // http://www.w3.org/TR/2002/WD-css3-box-20021024/#overflow
         "overflow-y",
         "overflow-clip",
-        "-moz-transform",
-        "-moz-transform-origin",
+        "transform",
+        "transform-origin",
         "white-space",
         "clip",
         "float",

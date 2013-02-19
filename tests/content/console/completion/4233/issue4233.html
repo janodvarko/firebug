@@ -3,6 +3,14 @@
 <head>
   <title>Test Case for Issue #4233</title>
   <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+<script>
+var htmlCollection = document.getElementsByTagName("html");
+var anArray = [1,2,3,4];
+var objWithNumericProps = {"0": 0, "1": 1};
+var largeArray = [];
+for (var i = 0; i < 10000; ++i)
+    largeArray.push(i);
+</script>
 </head>
 <body>
 
@@ -16,8 +24,8 @@
 
 <ol>
 <li>Open Firebug and enable the Console panel.</li>
-<li>Step by step type following expressions in the the command line
-and verify that the autocompletion popup window<br/> appears for:</li>
+<li>Step by step type the following expressions in the command line and verify
+that completions appear for:</li>
 <ul>
     <li><code style="color:green">i</code></li>
     <li><code style="color:green">document.q</code></li>
@@ -38,13 +46,16 @@ and verify that the autocompletion popup window<br/> appears for:</li>
     <li><code style="color:green">id(1)/i</code></li>
     <li><code style="color:green">(1)/i</code></li>
     <li><code style="color:green">/a/.t</code></li>
-    <li><code style="color:green">(1)/i</code></li>
     <li><code style="color:green">var a = i</code></li>
     <li><code style="color:green">if(1){i</code></li>
     <li><code style="color:green">a=0;{i</code></li>
+    <li><code style="color:green">a=0;try{i</code></li>
+    <li><code style="color:green">if(0) ; else { i</code></li>
+    <li><code style="color:green">throw f(i</code></li>
     <li><code style="color:green">({a: i</code></li>
     <li><code style="color:green">{i</code></li>
     <li><code style="color:green">{a: window, i</code></li>
+    <li><code style="color:green">id.get+(i</code></li>
     <li><code style="color:green">date().g</code></li>
     <li><code style="color:green">mk4().c</code></li>
     <li><code style="color:green">mk4().chain().c</code></li>
@@ -52,12 +63,16 @@ and verify that the autocompletion popup window<br/> appears for:</li>
     <li><code style="color:green">getterSeemingEval('[window]')[0].i</code></li>
     <li><code style="color:green">String.prototype.ch</code></li>
     <li><code style="color:green">new Date().g</code></li>
+    <li><code style="color:green">anArray["0</code></li>
+    <li><code style="color:green">objWithNumericProps.0</code></li>
+    <li><code style="color:green">largeArray.leng</code></li>
+    <li><code style="color:green">largeArray.j</code></li>
 </ul>
 
-and doesn't appear for:
+and don't appear for:
 <ul>
     <li><code style="color:green">if(1)/i</code></li>
-    <li><code style="color:green">if(1)/i</code></li>
+    <li><code style="color:green">if(0);else/i</code></li>
     <li><code style="color:green">(function()/i</code></li>
     <li><code style="color:green">/[/; i</code></li>
     <li><code style="color:green">1+/i</code></li>
@@ -66,14 +81,19 @@ and doesn't appear for:
     <li><code style="color:green">var i</code></li>
     <li><code style="color:green">var a = 0, i</code></li>
     <li><code style="color:green">var a, i</code></li>
+    <li><code style="color:green">throw {i</code></li>
     <li><code style="color:green">({ i</code></li>
     <li><code style="color:green">({a: window, i</code></li>
     <li><code style="color:green">function(i</code></li>
+    <li><code style="color:green">function &nbsp;(i</code></li>
     <li><code style="color:green">function f(i</code></li>
     <li><code style="color:green">f=function(i</code></li>
     <li><code style="color:green">function i</code></li>
     <li><code style="color:green">function([i</code></li>
+    <li><code style="color:green">[{set a([i</code></li>
     <li><code style="color:green">id(eval('window')).i</code></li>
+    <li><code style="color:green">anArray.0</code></li>
+    <li><code style="color:green">htmlCollection.0</code></li>
     <li><code style="color:green">(window).i</code></li>
     <li><code style="color:green">q='';q.s</code></li>
 </ul>

@@ -22,7 +22,6 @@ define([
     "firebug/chrome/menu",
     "firebug/trace/debug",
     "firebug/lib/keywords",
-    "firebug/js/fbs",   // bug712289
     "firebug/editor/editorSelector",
     "firebug/chrome/infotip",
     "firebug/chrome/searchBox",
@@ -31,7 +30,7 @@ define([
 ],
 function (Obj, Firebug, Firefox, FirebugReps, Domplate, JavaScriptTool, CompilationUnit,
     Locale, Events, Url, SourceLink, StackFrame, Css, Dom, Win, Search, Persist,
-    System, Menu, Debug, Keywords, FBS) {
+    System, Menu, Debug, Keywords) {
 
 // ********************************************************************************************* //
 // Script panel
@@ -47,7 +46,7 @@ for (var p in Firebug.EditorSelector)
 Firebug.ScriptPanel.getEditorOptionKey = function()
 {
     return "JSEditor";
-}
+};
 
 Firebug.ScriptPanel.reLineNumber = /^[^\\]?#(\d*)$/;
 
@@ -60,7 +59,7 @@ Firebug.ScriptPanel.decorator = Obj.extend(new Firebug.SourceBoxDecorator,
     decorate: function(sourceBox, unused)
     {
         this.markExecutableLines(sourceBox);
-        this.setLineBreakpoints(sourceBox.repObject, sourceBox)
+        this.setLineBreakpoints(sourceBox.repObject, sourceBox);
     },
 
     markExecutableLines: function(sourceBox)
@@ -170,7 +169,13 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
         // Front side UI mark
         var firebugStatus = Firefox.getElementById("firebugStatus");
         if (firebugStatus)
-            firebugStatus.setAttribute("script", active ? "on" : "off");
+        {
+            // Use enabled state for the status flag. JSD can be active even if
+            // the Script panel itself is deactivated (i.e. because the Console
+            // panel is enabled). See issue 2582 for more details.
+            var enabled = this.isEnabled();
+            firebugStatus.setAttribute("script", (enabled && active) ? "on" : "off");
+        }
 
         if (Firebug.StartButton)
             Firebug.StartButton.resetTooltip();
@@ -182,8 +187,8 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
 
         if (FBTrace.DBG_ACTIVATION)
         {
-            FBTrace.sysout("script.onJavaScriptDebugging "+active+" icon attribute: "+
-                Firefox.getElementById('firebugStatus').getAttribute("script"));
+            FBTrace.sysout("script.onJavaScriptDebugging " + active + " icon attribute: " +
+                Firefox.getElementById("firebugStatus").getAttribute("script"));
         }
     },
 
@@ -498,7 +503,7 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
         var self = this;
 
         // If the evaluate fails, then we report an error and don't show the infotip
-        Firebug.CommandLine.evaluate(expr, this.context, null, this.context.getGlobalScope(),
+        Firebug.CommandLine.evaluate(expr, this.context, null, this.context.getCurrentGlobal(),
             function success(result, context)
             {
                 var rep = Firebug.getRep(result, context);
@@ -713,7 +718,7 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
     {
         this.tooltip = this.document.createElement("div");
         Css.setClass(this.tooltip, "scriptTooltip");
-        this.tooltip.setAttribute('aria-live', 'polite')
+        this.tooltip.setAttribute('aria-live', 'polite');
         Css.obscure(this.tooltip, true);
         this.panelNode.appendChild(this.tooltip);
 
@@ -809,6 +814,10 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
     {
         return Win.iterateBrowserWindows("navigator:browser", function(win)
         {
+            // Firebug doesn't have to be loaded in every browser window (see delayed load).
+            if (!win.Firebug.TabWatcher)
+                return false;
+
             return win.Firebug.TabWatcher.iterateContexts(function(context)
             {
                 if (context.stopped)
@@ -904,15 +913,16 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
         this.showToolbarButtons("fbLocationButtons", active);
         this.showToolbarButtons("fbScriptButtons", active);
         this.showToolbarButtons("fbStatusButtons", active);
+        this.showToolbarButtons("fbLocationList", active);
 
         Firebug.chrome.$("fbRerunButton").setAttribute("tooltiptext",
             Locale.$STRF("firebug.labelWithShortcut", [Locale.$STR("script.Rerun"), "Shift+F8"]));
         Firebug.chrome.$("fbContinueButton").setAttribute("tooltiptext",
             Locale.$STRF("firebug.labelWithShortcut", [Locale.$STR("script.Continue"), "F8"]));
         Firebug.chrome.$("fbStepIntoButton").setAttribute("tooltiptext",
-            Locale.$STRF("firebug.labelWithShortcut", [Locale.$STR("script.Step_Into"), "F10"]));
+            Locale.$STRF("firebug.labelWithShortcut", [Locale.$STR("script.Step_Into"), "F11"]));
         Firebug.chrome.$("fbStepOverButton").setAttribute("tooltiptext",
-            Locale.$STRF("firebug.labelWithShortcut", [Locale.$STR("script.Step_Over"), "F11"]));
+            Locale.$STRF("firebug.labelWithShortcut", [Locale.$STR("script.Step_Over"), "F10"]));
         Firebug.chrome.$("fbStepOutButton").setAttribute("tooltiptext",
             Locale.$STRF("firebug.labelWithShortcut",
                 [Locale.$STR("script.Step_Out"), "Shift+F11"]));
@@ -970,7 +980,7 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
             if (!isNaN(lineNo) && (lineNo > 0) && (lineNo < sourceBox.lines.length) )
             {
                 this.scrollToLine(sourceBox.repObject.getURL(), lineNo,
-                    this.jumpHighlightFactory(lineNo, this.context))
+                    this.jumpHighlightFactory(lineNo, this.context));
                 return true;
             }
         }
@@ -1373,8 +1383,14 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
     optionMenu: function(label, option)
     {
         var checked = Firebug.Options.get(option);
-        return {label: label, type: "checkbox", checked: checked,
-            command: Obj.bindFixed(Firebug.Options.set, Firebug, option, !checked) };
+        return {
+            label: label, type: "checkbox", checked: checked,
+            command: function()
+            {
+                var checked = this.hasAttribute("checked");
+                Firebug.Options.set(option, checked);
+            }
+        };
     },
 
     getContextMenuItems: function(fn, target)
@@ -1565,27 +1581,6 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
         this.onJavaScriptDebugging(isActive, "onActiveTool");
     },
 
-    setEnabled: function(enable)
-    {
-        // bug712289
-        if (!FBS.isJSDAvailable())
-        {
-            Firebug.SourceBoxPanel.setEnabled.apply(this, [false]);
-            return;
-        }
-
-        Firebug.SourceBoxPanel.setEnabled.apply(this, arguments);
-    },
-
-    isPanelEnabled: function(panelType)
-    {
-        // bug712289
-        if (!FBS.isJSDAvailable())
-            return false;
-
-        return Firebug.SourceBoxPanel.isPanelEnabled.apply(this, arguments);
-    },
-
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
     // Toolbar functions
 
@@ -1595,13 +1590,9 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
         [
             chrome.keyCodeListen("F8", Events.isShift, Obj.bind(this.rerun, this, context), true),
             chrome.keyCodeListen("F8", null, Obj.bind(this.resume, this, context), true),
-            chrome.keyListen("/", Events.isControl, Obj.bind(this.resume, this, context)),
             chrome.keyCodeListen("F10", null, Obj.bind(this.stepOver, this, context), true),
-            chrome.keyListen("'", Events.isControl, Obj.bind(this.stepOver, this, context)),
             chrome.keyCodeListen("F11", null, Obj.bind(this.stepInto, this, context)),
-            chrome.keyListen(";", Events.isControl, Obj.bind(this.stepInto, this, context)),
-            chrome.keyCodeListen("F11", Events.isShift, Obj.bind(this.stepOut, this, context)),
-            chrome.keyListen(",", Events.isControlShift, Obj.bind(this.stepOut, this, context))
+            chrome.keyCodeListen("F11", Events.isShift, Obj.bind(this.stepOut, this, context))
         ];
     },
 
@@ -1631,29 +1622,27 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
         if (!chrome)
         {
             if (FBTrace.DBG_ERRORS)
-                FBTrace.sysout("debugger.syncCommand, context with no chrome: " +
-                    context.getGlobalScope());
-
+                FBTrace.sysout("debugger.syncCommand, context with no chrome", context);
             return;
         }
 
         if (context.stopped)
         {
             chrome.setGlobalAttribute("fbDebuggerButtons", "stopped", "true");
-            chrome.setGlobalAttribute("cmd_rerun", "disabled", "false");
-            chrome.setGlobalAttribute("cmd_resumeExecution", "disabled", "false");
-            chrome.setGlobalAttribute("cmd_stepOver", "disabled", "false");
-            chrome.setGlobalAttribute("cmd_stepInto", "disabled", "false");
-            chrome.setGlobalAttribute("cmd_stepOut", "disabled", "false");
+            chrome.setGlobalAttribute("cmd_firebug_rerun", "disabled", "false");
+            chrome.setGlobalAttribute("cmd_firebug_resumeExecution", "disabled", "false");
+            chrome.setGlobalAttribute("cmd_firebug_stepOver", "disabled", "false");
+            chrome.setGlobalAttribute("cmd_firebug_stepInto", "disabled", "false");
+            chrome.setGlobalAttribute("cmd_firebug_stepOut", "disabled", "false");
         }
         else
         {
             chrome.setGlobalAttribute("fbDebuggerButtons", "stopped", "false");
-            chrome.setGlobalAttribute("cmd_rerun", "disabled", "true");
-            chrome.setGlobalAttribute("cmd_stepOver", "disabled", "true");
-            chrome.setGlobalAttribute("cmd_stepInto", "disabled", "true");
-            chrome.setGlobalAttribute("cmd_stepOut", "disabled", "true");
-            chrome.setGlobalAttribute("cmd_resumeExecution", "disabled", "true");
+            chrome.setGlobalAttribute("cmd_firebug_rerun", "disabled", "true");
+            chrome.setGlobalAttribute("cmd_firebug_stepOver", "disabled", "true");
+            chrome.setGlobalAttribute("cmd_firebug_stepInto", "disabled", "true");
+            chrome.setGlobalAttribute("cmd_firebug_stepOut", "disabled", "true");
+            chrome.setGlobalAttribute("cmd_firebug_resumeExecution", "disabled", "true");
         }
     },
 
@@ -1694,7 +1683,7 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
 
         try
         {
-            var currentBreakable = Firebug.chrome.getGlobalAttribute("cmd_toggleBreakOn",
+            var currentBreakable = Firebug.chrome.getGlobalAttribute("cmd_firebug_toggleBreakOn",
                 "breakable");
 
             if (FBTrace.DBG_BP)
@@ -1706,7 +1695,7 @@ Firebug.ScriptPanel.prototype = Obj.extend(Firebug.SourceBoxPanel,
 
             // If currentBreakable is false, then we are armed, but we broke
             if (currentBreakable == "false")
-                Firebug.chrome.setGlobalAttribute("cmd_toggleBreakOn", "breakable", "true");
+                Firebug.chrome.setGlobalAttribute("cmd_firebug_toggleBreakOn", "breakable", "true");
 
             // If Firebug is minimized, open the UI to show we are stopped
             if (Firebug.isMinimized())
@@ -1898,7 +1887,7 @@ Firebug.ScriptPanel.WarningRep = domplate(Firebug.Rep,
         var args = {
             pageTitle: Locale.$STR("script.warning.javascript_not_enabled"),
             suggestion: Locale.$STR("script.suggestion.javascript_not_enabled")
-        }
+        };
 
         var box = this.tag.replace(args, parentNode, this);
         this.enableScriptTag.append({}, box, this);
@@ -1911,7 +1900,7 @@ Firebug.ScriptPanel.WarningRep = domplate(Firebug.Rep,
         var args = {
             pageTitle: Locale.$STR("script.warning.debugger_not_activated"),
             suggestion: Locale.$STR("script.suggestion.debugger_not_activated")
-        }
+        };
 
         var box = this.tag.replace(args, parentNode, this);
 
@@ -1932,7 +1921,7 @@ Firebug.ScriptPanel.WarningRep = domplate(Firebug.Rep,
         var args = {
             pageTitle: Locale.$STR("script.warning.no_javascript"),
             suggestion: Locale.$STR("script.suggestion.no_javascript2")
-        }
+        };
         return this.tag.replace(args, parentNode, this);
     },
 
@@ -1941,12 +1930,12 @@ Firebug.ScriptPanel.WarningRep = domplate(Firebug.Rep,
         var args = {
             pageTitle: Locale.$STR("script.warning.no_system_source_debugging"),
             suggestion: Locale.$STR("script.suggestion.no_system_source_debugging")
-        }
+        };
 
         var box = this.tag.replace(args, parentNode, this);
         var description = box.getElementsByClassName("disabledPanelDescription").item(0);
         FirebugReps.Description.render(args.suggestion, description,
-            Obj.bindFixed(Firebug.visitWebsite,  this, "issue5110"));
+            Obj.bindFixed(Firebug.chrome.visitWebsite, this, "issue5110"));
 
         return box;
     },
@@ -1956,7 +1945,7 @@ Firebug.ScriptPanel.WarningRep = domplate(Firebug.Rep,
         var args = {
             pageTitle: Locale.$STR("script.warning.debugger_active"),
             suggestion: Locale.$STR("script.suggestion.debugger_active")
-        }
+        };
 
         var box = this.tag.replace(args, parentNode, this);
         this.focusDebuggerTag.append({}, box, this);

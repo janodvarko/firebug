@@ -8,7 +8,6 @@ define([
     "firebug/lib/locale",
     "firebug/lib/wrapper",
     "firebug/lib/url",
-    "firebug/console/console",
     "firebug/js/stackFrame",
     "firebug/lib/events",
     "firebug/lib/css",
@@ -16,8 +15,8 @@ define([
     "firebug/lib/string",
     "firebug/js/fbs",
 ],
-function(Obj, Firebug, Domplate, FirebugReps, Locale, Wrapper, Url, Console,
-    StackFrame, Events, Css, Dom, Str, FBS) {
+function(Obj, Firebug, Domplate, FirebugReps, Locale, Wrapper, Url, StackFrame, Events,
+    Css, Dom, Str, FBS) {
 
 // ********************************************************************************************* //
 // Constants
@@ -82,13 +81,13 @@ Firebug.Profiler = Obj.extend(Firebug.Module,
 
         // Attributes must be modified on the <command> element. All toolbar buttons
         // and menuitems are hooked up to the command.
-        Firebug.chrome.setGlobalAttribute("cmd_toggleProfiling", "disabled",
+        Firebug.chrome.setGlobalAttribute("cmd_firebug_toggleProfiling", "disabled",
             disabled ? "true" : "false");
 
         // Update button's tooltip.
         var tooltipText = disabled ? Locale.$STR("ProfileButton.Disabled.Tooltip")
             : Locale.$STR("ProfileButton.Enabled.Tooltip");
-        Firebug.chrome.setGlobalAttribute("cmd_toggleProfiling", "tooltiptext", tooltipText);
+        Firebug.chrome.setGlobalAttribute("cmd_firebug_toggleProfiling", "tooltiptext", tooltipText);
     },
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
@@ -113,7 +112,7 @@ Firebug.Profiler = Obj.extend(Firebug.Module,
     {
         FBS.startProfiling();
 
-        Firebug.chrome.setGlobalAttribute("cmd_toggleProfiling", "checked", "true");
+        Firebug.chrome.setGlobalAttribute("cmd_firebug_toggleProfiling", "checked", "true");
 
         var originalTitle = title;
         var isCustomMessage = !!title;
@@ -134,7 +133,7 @@ Firebug.Profiler = Obj.extend(Firebug.Module,
         if (totalTime == -1)
             return;
 
-        Firebug.chrome.setGlobalAttribute("cmd_toggleProfiling", "checked", "false");
+        Firebug.chrome.setGlobalAttribute("cmd_firebug_toggleProfiling", "checked", "false");
 
         if (cancelReport)
             delete context.profileRow;
@@ -148,7 +147,7 @@ Firebug.Profiler = Obj.extend(Firebug.Module,
 
     isProfiling: function()
     {
-        return (Firebug.chrome.getGlobalAttribute("cmd_toggleProfiling", "checked") === "true")
+        return (Firebug.chrome.getGlobalAttribute("cmd_firebug_toggleProfiling", "checked") === "true");
     },
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
@@ -173,7 +172,7 @@ Firebug.Profiler = Obj.extend(Firebug.Module,
         var sourceFileMap = context.sourceFileMap;
         if (FBTrace.DBG_PROFILER)
         {
-            for (url in sourceFileMap)
+            for (var url in sourceFileMap)
                 FBTrace.sysout("logProfileReport: "+sourceFileMap[url]+"\n");
         }
 
@@ -351,13 +350,13 @@ Firebug.Profiler.ProfileTable = domplate(
         {
           Css.removeClass(header, "sortedAscending");
           Css.setClass(header, "sortedDescending");
-          header.setAttribute("aria-sort", "descending")
+          header.setAttribute("aria-sort", "descending");
 
           header.sorted = 1;
 
           for (var i = values.length-1; i >= 0; --i)
               tbody.appendChild(values[i].row);
-        }
+        };
 
         var tbody = Dom.getChildByClass(table, "profileTbody");
         var thead = Dom.getChildByClass(table, "profileThead");
@@ -514,10 +513,38 @@ function ProfileCall(script, context, callCount, totalTime, totalOwnTime, minTim
 }
 
 // ********************************************************************************************* //
+// CommandLine Support
+
+function profile(context, args)
+{
+    var title = args[0];
+    Firebug.Profiler.startProfiling(context, title);
+    return Firebug.Console.getDefaultReturnValue(context.window);
+};
+
+function profileEnd(context)
+{
+    Firebug.Profiler.stopProfiling(context);
+    return Firebug.Console.getDefaultReturnValue(context.window);
+};
+
+// ********************************************************************************************* //
 // Registration
 
 Firebug.registerModule(Firebug.Profiler);
 Firebug.registerRep(Firebug.Profiler.ProfileCall);
+
+Firebug.registerCommand("profile", {
+    handler: profile.bind(this),
+    helpUrl: "http://getfirebug.com/wiki/index.php/profile",
+    description: Locale.$STR("console.cmd.help.profile")
+});
+
+Firebug.registerCommand("profileEnd", {
+    handler: profileEnd.bind(this),
+    helpUrl: "http://getfirebug.com/wiki/index.php/profileEnd",
+    description: Locale.$STR("console.cmd.help.profileEnd")
+});
 
 return Firebug.Profiler;
 

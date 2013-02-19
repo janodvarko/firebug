@@ -43,6 +43,7 @@ function runTest()
                 });
 
                 FBTest.sendKey("HOME", editor);
+                FBTest.sendKey("LEFT", editor);
                 // Move text cursor before the 'e' of 'Lorem'
                 for (var i=0; i<3; i++)
                     FBTest.sendKey("RIGHT", editor);

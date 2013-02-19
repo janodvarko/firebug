@@ -125,7 +125,7 @@ Firebug.CommandLine.Popup = Obj.extend(Firebug.Module,
             FBTrace.sysout("commandLine.Popup.toggle;");
 
         var newState = !this.isVisible();
-        Firebug.chrome.setGlobalAttribute("cmd_toggleCommandPopup", "checked", newState);
+        Firebug.chrome.setGlobalAttribute("cmd_firebug_toggleCommandPopup", "checked", newState);
         Firebug.Options.set("alwaysShowCommandLine", newState);
 
         this.updateVisibility(newState);
@@ -152,13 +152,13 @@ Firebug.CommandLine.Popup = Obj.extend(Firebug.Module,
     {
         var chrome = Firebug.chrome;
         var popup = chrome.$("fbCommandPopup");
-        var splitter = chrome.$("fbCommandPopupSplitter")
+        var splitter = chrome.$("fbCommandPopupSplitter");
         var cmdbox = chrome.$("fbCommandBox");
         var toggle = chrome.$("fbToggleCommandLine");
 
         // If all the visual parts are already visible then bail out.
         if (visible && !Dom.isCollapsed(popup) && !Dom.isCollapsed(splitter) &&
-            !Dom.isCollapsed(cmdbox) && !Dom.isCollapsed(toggle))
+            !Dom.isCollapsed(cmdbox) && Dom.isCollapsed(toggle))
             return;
 
         Dom.collapse(popup, !visible);
@@ -195,7 +195,7 @@ Firebug.CommandLine.Popup = Obj.extend(Firebug.Module,
 
     isVisible: function()
     {
-        var checked = Firebug.chrome.getGlobalAttribute("cmd_toggleCommandPopup", "checked");
+        var checked = Firebug.chrome.getGlobalAttribute("cmd_firebug_toggleCommandPopup", "checked");
         return (checked == "true") ? true : false;
     },
 

@@ -4,9 +4,10 @@ define([
     "firebug/lib/trace",
     "firebug/lib/locale",
     "firebug/lib/options",
-    "firebug/lib/css"
+    "firebug/lib/css",
+    "firebug/lib/deprecated"
 ],
-function(FBTrace, Locale, Options, Css) {
+function(FBTrace, Locale, Options, Css, Deprecated) {
 
 // ********************************************************************************************* //
 // Constants
@@ -15,25 +16,57 @@ var Menu = {};
 
 // ********************************************************************************************* //
 
-Menu.createMenu = function(popup, label)
+Menu.createMenu = function(popup, item)
 {
+    if (typeof item == "string")
+    {
+        return Deprecated.deprecated("The function's header changed to "+
+            "createMenu(popup, item)",
+            Menu.createMenu, [popup, {label: item}])();
+    }
+
     var menu = popup.ownerDocument.createElement("menu");
-    menu.setAttribute("label", label);
-
-    var menuPopup = popup.ownerDocument.createElement("menupopup");
-
     popup.appendChild(menu);
-    menu.appendChild(menuPopup);
+
+    Menu.setItemIntoElement(menu, item);
+
+    this.createMenuPopup(menu, item);
+
+    return menu;
+};
+
+Menu.createMenuPopup = function(parent, item)
+{
+    var menuPopup = parent.ownerDocument.createElement("menupopup");
+    parent.appendChild(menuPopup);
+
+    if (item.items)
+    {
+        for (var i = 0, len = item.items.length; i < len; ++i)
+            Menu.createMenuItem(menuPopup, item.items[i]);
+    }
 
     return menuPopup;
+}
+
+// Menu.createMenuItems(popup, items[, before])
+Menu.createMenuItems = function(popup, items, before)
+{
+    for (var i=0; i<items.length; i++)
+        Menu.createMenuItem(popup, items[i], before);
 };
 
 Menu.createMenuItem = function(popup, item, before)
 {
-    if (typeof(item) == "string" && item.charAt(0) == "-")
-        return Menu.createMenuSeparator(popup, before);
+    if ((typeof(item) == "string" && item == "-") || item.label == "-")
+        return Menu.createMenuSeparator(popup, item, before);
 
-    var menuitem = popup.ownerDocument.createElement("menuitem");
+    var menuitem;
+
+    if (item.items)
+        menuitem = Menu.createMenu(popup, item);
+    else
+        menuitem = popup.ownerDocument.createElement("menuitem");
 
     Menu.setItemIntoElement(menuitem, item);
 
@@ -100,8 +133,11 @@ Menu.setItemIntoElement = function(element, item)
     if (item.name)
         element.setAttribute("name", item.name);
 
+    if (item.items && (item.command || item.commandID))
+        element.setAttribute("type", "splitmenu");
+
     return element;
-}
+};
 
 Menu.createMenuHeader = function(popup, item)
 {
@@ -116,17 +152,31 @@ Menu.createMenuHeader = function(popup, item)
     return header;
 };
 
-Menu.createMenuSeparator = function(popup, before)
+Menu.createMenuSeparator = function(popup, item, before)
 {
+    if (item instanceof Node)
+    {
+        return Deprecated.deprecated("The function's header changed to "+
+            "createMenuSeparator(popup, item, before)",
+            Menu.createMenuSeparator, [popup, null, before])();
+    }
+
     if (!popup.firstChild)
         return;
 
-    var menuitem = popup.ownerDocument.createElement("menuseparator");
+    if (FBTrace.DBG_MENU)
+        FBTrace.sysout("createMenuSeparator", {popup: popup, item: item, before: before});
+
+    var menuItem = popup.ownerDocument.createElement("menuseparator");
+    if (typeof item == "object" && item.id)
+        menuItem.setAttribute("id", item.id);
+
     if (before)
-        popup.insertBefore(menuitem, before);
+        popup.insertBefore(menuItem, before);
     else
-        popup.appendChild(menuitem);
-    return menuitem;
+        popup.appendChild(menuItem);
+
+    return menuItem;
 };
 
 /**
@@ -147,7 +197,7 @@ Menu.optionMenu = function(label, option, tooltiptext)
         option: option,
         tooltiptext: tooltiptext,
         command: function() {
-            return Options.set(option, !Firebug[option]);
+            return Options.togglePref(option);
         }
     };
 };

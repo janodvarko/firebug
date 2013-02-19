@@ -30,7 +30,6 @@ const jsdIErrorHook = Ci.jsdIErrorHook;
 const jsdIFilter = Components.interfaces.jsdIFilter;
 const nsISupports = Ci.nsISupports;
 const nsIPrefBranch = Ci.nsIPrefBranch;
-const nsIPrefBranch2 = Ci.nsIPrefBranch2;
 const nsIComponentRegistrar = Ci.nsIComponentRegistrar;
 const nsIFactory = Ci.nsIFactory;
 const nsIConsoleService = Ci.nsIConsoleService;
@@ -96,9 +95,11 @@ const COMPONENTS_FILTERS = [
 
 const reDBG = /DBG_(.*)/;
 const reXUL = /\.xul$|\.xml$/;
-const reTooMuchRecursion = /too\smuch\srecursion/;
 
-const getPref = Components.utils.import("resource://firebug/loader.js", {}).FirebugLoader.getPref; 
+Cu.import("resource://firebug/prefLoader.js");
+
+var getPref = PrefLoader.getPref;
+
 // ********************************************************************************************* //
 // Globals
 
@@ -145,7 +146,7 @@ var errorInfo = null;
 var timer = Timer.createInstance(nsITimer);
 var waitingForTimer = false;
 
-var FBTrace = null;
+Cu.import("resource://firebug/fbtrace.js");
 
 // ********************************************************************************************* //
 
@@ -480,8 +481,10 @@ OutStepper.prototype =
 
         // else it's is not a frame we care about
         if (FBTrace.DBG_FBS_STEP)
+        {
             FBTrace.sysout("fbs." + this.mode + ".onFunctionReturn callingFrameId " +
-                callingFrameId + " called frame " + frameToString(frame), this)
+                callingFrameId + " called frame " + frameToString(frame), this);
+        }
     },
 
     unhook: function(frame)
@@ -491,8 +494,10 @@ OutStepper.prototype =
     hit: function(frame, type, rv)
     {
         if (FBTrace.DBG_FBS_STEP)
+        {
             FBTrace.sysout("fbs." + this.mode + " hit " + getCallFromType(type) + " at " +
                 frameToString(frame), this);
+        }
 
         var debuggr = fbs.reFindDebugger(frame, this.debuggr);
         if (debuggr)
@@ -694,11 +699,12 @@ LogFunctionStepper.prototype =
 
         if (!frame.callingFrame)
         {
-            var diff = (fbs.stackDescription.oldestTag !== frame.script.tag);
-
             if (FBTrace.DBG_FBS_STEP)
+            {
+                var diff = (fbs.stackDescription.oldestTag !== frame.script.tag);
                 FBTrace.sysout("fbs.Stack ends at depth "+fbs.stackDescription.depth +
                     (diff ? " NO Match on tag " : " tags match"), fbs.stackDescription.entries);
+            }
 
             fbs.stackDescription.entries = [];
         }
@@ -727,10 +733,6 @@ var fbs =
 {
     initialize: function()
     {
-        Components.utils.import("resource://firebug/firebug-trace-service.js");
-
-        FBTrace = traceConsoleService.getTracer("extensions.firebug");
-
         if (FBTrace.DBG_FBS_ERRORS)
             FBTrace.sysout("fbs.FirebugService Starting");
 
@@ -745,7 +747,6 @@ var fbs =
         fbs.restoreBreakpoints();
 
         this.onDebugRequests = 0;  // the number of times we called onError but did not call onDebug
-        fbs._lastErrorDebuggr = null;
 
 
         if (FBTrace.DBG_FBS_ERRORS)
@@ -753,7 +754,7 @@ var fbs =
 
         this.profiling = false;
 
-        prefs = PrefService.getService(nsIPrefBranch2);
+        prefs = PrefService.getService(nsIPrefBranch);
         fbs.prefDomain = "extensions.firebug";
         prefs.addObserver(fbs.prefDomain, fbs, false);
 
@@ -848,9 +849,11 @@ var fbs =
         // make sure to unregister all the hooks
         var hookNames = ["error", "script", "breakpoint", "debugger", "debug", "interrupt", 
             "throw", "topLevel", "function", "debug"];
-        for each (var hook in hookNames)
+        for (var i=0; i<hookNames.length; i++)
         {
-            try {
+            var hook = hookNames[i];
+            try
+            {
                 jsd[hook + "Hook"] = null;
             }
             catch (exc)
@@ -1233,6 +1236,7 @@ var fbs =
         }
 
         bp.condition = condition;
+        delete bp.transformedCondition;
 
         dispatch(debuggers, "onToggleBreakpoint", [sourceFile.href, lineNo, true, bp]);
 
@@ -1254,14 +1258,20 @@ var fbs =
             if (!url)
                 continue;
 
-            var urlBreakpoints = fbs.getBreakpoints(url);
+            var urlBreakpointsTemp = fbs.getBreakpoints(url);
 
             if (FBTrace.DBG_FBS_BP)
+            {
                 FBTrace.sysout("fbs.clearAllBreakpoints " + url + " urlBreakpoints: " +
-                    (urlBreakpoints ? urlBreakpoints.length : "null"));
+                    (urlBreakpointsTemp ? urlBreakpointsTemp.length : "null"));
+            }
 
-            if (!urlBreakpoints)
+            if (!urlBreakpointsTemp)
                 continue;
+
+            // Clone before iteration the array is modified within the loop.
+            var urlBreakpoints = [];
+            urlBreakpoints.push.apply(urlBreakpoints, urlBreakpointsTemp);
 
             for (var ibp=0; ibp<urlBreakpoints.length; ibp++)
             {
@@ -1276,9 +1286,13 @@ var fbs =
     {
         if (url)
         {
-            var urlBreakpoints = fbs.getBreakpoints(url);
-            if (urlBreakpoints)
+            var urlBreakpointsTemp = fbs.getBreakpoints(url);
+            if (urlBreakpointsTemp)
             {
+                // Clone before iteration (the array can be modified in the callback).
+                var urlBreakpoints = [];
+                urlBreakpoints.push.apply(urlBreakpoints, urlBreakpointsTemp);
+
                 for (var i = 0; i < urlBreakpoints.length; ++i)
                 {
                     var bp = urlBreakpoints[i];
@@ -1342,11 +1356,31 @@ var fbs =
         var index = this.findErrorBreakpoint(url, lineNo);
         if (index != -1)
         {
-            var bp = this.removeBreakpoint(BP_NORMAL | BP_ERROR, url, lineNo);
+            this.removeBreakpoint(BP_NORMAL | BP_ERROR, url, lineNo);
 
             errorBreakpoints.splice(index, 1);
             dispatch(debuggers, "onToggleErrorBreakpoint", [url, lineNo, false, debuggr]);
-            fbs.saveBreakpoints(url);  // after every call to onToggleBreakpoint
+
+            // after every call to onToggleBreakpoint
+            fbs.saveBreakpoints(url);
+        }
+    },
+
+    clearErrorBreakpoints: function(sourceFiles, debuggr)
+    {
+        for (var i=0; i<sourceFiles.length; ++i)
+        {
+            var url = sourceFiles[i].href;
+            if (!url)
+                continue;
+
+            fbs.enumerateErrorBreakpoints(url,
+            {
+                call: function(url, lineNo)
+                {
+                    fbs.clearErrorBreakpoint(url, lineNo, debuggr);
+                }
+            });
         }
     },
 
@@ -1357,20 +1391,24 @@ var fbs =
 
     enumerateErrorBreakpoints: function(url, cb)
     {
+        // Clone breakpoints array before iteration. The callback could modify it.
+        var copyBreakpoints = [];
+        copyBreakpoints.push.apply(copyBreakpoints, errorBreakpoints);
+
         if (url)
         {
-            for (var i = 0; i < errorBreakpoints.length; ++i)
+            for (var i=0; i<copyBreakpoints.length; ++i)
             {
-                var bp = errorBreakpoints[i];
+                var bp = copyBreakpoints[i];
                 if (bp.href == url)
                     cb.call(bp.href, bp.lineNo, bp);
             }
         }
         else
         {
-            for (var i = 0; i < errorBreakpoints.length; ++i)
+            for (var i=0; i<copyBreakpoints.length; ++i)
             {
-                var bp = errorBreakpoints[i];
+                var bp = copyBreakpoints[i];
                 cb.call(bp.href, bp.lineNo, bp);
             }
         }
@@ -1541,61 +1579,8 @@ var fbs =
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-    /**
-     * Do not activate JSD, which is broken in Firefox 9 on Mac and Linux 32 bit
-     * This method is checking the current platform & browser configuration and 
-     * return false for Mac/Linux 32 bit
-     *
-     * See: https://bugzilla.mozilla.org/show_bug.cgi?id=712289
-     *
-     * Can be removed when the min Firefox version is 10
-     * 
-     * Search for 'bug712289' within the source code to remove all find all related
-     * parts of this workaround.
-     */
-    isJSDAvailable: function()
-    {
-        if (typeof(this._isJSDAvailable) == "undefined")
-        {
-            var systemInfo = Cc["@mozilla.org/xre/app-info;1"].getService(Ci.nsIXULRuntime);
-
-            // Check the current OS, must not be Mac or Linux 32 bit
-            var os = systemInfo.XPCOMABI == "x86-gcc3";
-
-            // Check the current Firefox version, must not be 9
-            systemInfo = systemInfo.QueryInterface(Ci.nsIXULAppInfo);
-            var ff = systemInfo.version.indexOf("9.") == 0;
-
-            // If one or another is false, JSD is available.
-            this._isJSDAvailable = !(os && ff);
-
-            if (!this._isJSDAvailable)
-            {
-                try
-                {
-                    consoleService = ConsoleService.getService(nsIConsoleService);
-                    consoleService.logStringMessage(
-                        "WARNING: Firebug Script panel is disabled in Firefox " +
-                        systemInfo.version + " running on 32 bit Mac or Linux (" +
-                        systemInfo.XPCOMABI + ")");
-                }
-                catch (err)
-                {
-                }
-            }
-        }
-
-        return this._isJSDAvailable;
-    },
-
-    // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
     enableDebugger: function()
     {
-        // bug712289
-        if (!this.isJSDAvailable())
-            return;
-
         if (waitingForTimer)
         {
             timer.cancel();
@@ -1882,7 +1867,7 @@ var fbs =
     {
         // For some reason, JSD reports file URLs like "file:/" instead of "file:///", so they
         // don't match up with the URLs we get back from the DOM
-        return url ? url.replace(/file:\/([^/])/, "file:///$1") : "";
+        return url ? url.replace(/file:\/([^\/])/, "file:///$1") : "";
     },
 
     denormalizeURL: function(url)
@@ -2141,13 +2126,13 @@ var fbs =
 
     onThrow: function(frame, type, rv)
     {
-        if ( isFilteredURL(frame.script.fileName) )
+        if (isFilteredURL(frame.script.fileName))
             return RETURN_CONTINUE_THROW;
 
         if (rv && rv.value && rv.value.isValid)
         {
             var value = rv.value;
-            if (value.jsClassName == "Error" && reTooMuchRecursion.test(value.stringValue))
+            if (value.jsClassName == "Error" && value.stringValue.indexOf("too much recursion") !== -1)
             {
                 if (fbs._lastErrorCaller)
                 {
@@ -2177,24 +2162,7 @@ var fbs =
             delete fbs._lastErrorCaller; // throw is not recursion either
         }
 
-        if (this.showStackTrace)  // store these in case the throw is not caught
-        {
-            var debuggr = this.findDebugger(frame);  // sets debuggr.breakContext
-            if (debuggr)
-            {
-                // https://bugzilla.mozilla.org/show_bug.cgi?id=669730
-                //fbs._lastErrorScript = frame.script;
-                //fbs._lastErrorLine = frame.line;
-                //fbs._lastErrorDebuggr = debuggr;
-                //fbs._lastErrorContext = debuggr.breakContext; // XXXjjb this is bad API
-            }
-            else
-            {
-                delete fbs._lastErrorDebuggr;
-            }
-        }
-
-        if (fbs.trackThrowCatch)
+        if (fbs.showStackTrace)
         {
             if (FBTrace.DBG_FBS_ERRORS)
                 FBTrace.sysout("fbs.onThrow from tag:" + frame.script.tag + ":" +
@@ -2277,7 +2245,7 @@ var fbs =
                 fbs.onTopLevelDelegate + " " + frame.script.tag + " " + frame.script.fileName);
 
         if (fbs.onTopLevelDelegate)
-            fbs.onTopLevelDelegate(frame, type)
+            fbs.onTopLevelDelegate(frame, type);
     },
 
     isTopLevelScript: function(frame, type, val)
@@ -3332,6 +3300,7 @@ var fbs =
         if (props)
         {
             bp.condition = props.condition;
+            delete bp.transformedCondition;
             bp.onTrue = props.onTrue;
             bp.hitCount = props.hitCount;
             if (bp.condition || bp.hitCount > 0)
@@ -3798,7 +3767,7 @@ var fbs =
             var bps = breakpointStore.getItem(url);
 
             // Do not restore "Run unit this line" breakpoints. This should solve complaints
-            // about Firebug braking in the sourece even if there are no breakpoints in
+            // about Firebug breaking in the source even if there are no breakpoints in
             // Firebug UI.
             if (bps.type == BP_UNTIL)
                 continue;
@@ -4078,7 +4047,7 @@ var fbs =
 
                     // stack empty
                     if (unhookAtBottom && hookFrameCount == 0)
-                       this.unhookFunctions();
+                       fbs.unhookFunctions();
 
                     contextCached = callBack(contextCached, frame, hookFrameCount, false);
                     break;
@@ -4140,7 +4109,7 @@ var ScriptInterrupter =
 
         this.entries[script.tag] = {
             script: script
-        }
+        };
     },
 
     disable: function(script)
@@ -4296,7 +4265,7 @@ function hook(fn, rv)
             ERROR(msg, exc);
             return rv;
         }
-    }
+    };
 }
 
 var lastWindowScope = null;
@@ -4387,7 +4356,32 @@ function testBreakpoint(frame, bp)
         var result = {};
         frame.scope.refresh();
 
-        if (frame.eval(bp.condition, "", 1, result))
+        // ugly hack for closure getter syntax
+        // (see also transformedCondition elsewhere in the code)
+        var cond = bp.condition;
+        if (cond.indexOf(".%") !== -1)
+        {
+            var frameScopeRoot = fbs.getOutermostScope(frame);
+            if (frameScopeRoot)
+            {
+                if (bp.transformedCondition && "__fb_scopedVars" in frameScopeRoot.wrappedJSObject)
+                {
+                    // Fast path: everything is already prepared for us.
+                    cond = bp.transformedCondition;
+                }
+                else
+                {
+                    var debuggr = fbs.findDebugger(frame);
+                    var context = debuggr.breakContext;
+                    delete debuggr.breakContext;
+
+                    cond = debuggr._temporaryTransformSyntax(cond, frameScopeRoot, context);
+                    bp.transformedCondition = cond;
+                }
+            }
+        }
+
+        if (frame.eval(cond, "", 1, result))
         {
             if (bp.onTrue)
             {

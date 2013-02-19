@@ -43,9 +43,8 @@ Firebug.getModuleLoaderConfig = function(baseConfig)
         "firebug/chrome/shortcuts",
         "firebug/firefox/start-button/startButtonOverlay",
         "firebug/firefox/external-editors/externalEditors",
-        "firebug/firefox/firebugMenu",
         "firebug/chrome/panelActivation",
-        "firebug/console/memoryProfiler",
+        //"firebug/console/memoryProfiler", xxxHonza: removed from 1.10 (issue 5599)
         "firebug/chrome/tableRep",
         "firebug/html/htmlPanel",
         "firebug/console/commandLinePopup",
@@ -57,11 +56,14 @@ Firebug.getModuleLoaderConfig = function(baseConfig)
         "firebug/js/tabCache",
         "firebug/chrome/activation",
         "firebug/css/stylePanel",
-        "firebug/css/computedPanel"
+        "firebug/css/computedPanel",
+        "firebug/cookies/cookieModule",
+        "firebug/cookies/cookiePanel",
+        "firebug/css/selectorPanel",
     ];
 
     return config;
-}
+};
 
 // ********************************************************************************************* //
 // Firebug Extension Registration
@@ -83,13 +85,10 @@ Firebug.registerExtension = function(extName, extConfig)
     var tempConfig = this.getExtensionConfig(extName);
     if (tempConfig)
     {
-        FBTrace.sysout("firebug.registerExtension; ERROR An extension with the same ID " +
-            "already exists! - " + extName, tempConfig);
+        Components.utils.reportError("firebug.registerExtension; ERROR An extension " +
+            "with the same ID already exists! - " + extName, tempConfig);
         return;
     }
-
-    if (FBTrace.DBG_REGISTRATION)
-        FBTrace.sysout("Extension registered: " + extName);
 
     this.extensions[extName] = extConfig;
 
@@ -127,11 +126,11 @@ Firebug.registerExtension = function(extName, extConfig)
         }
         catch (err)
         {
-            if (FBTrace.DBG_ERRORS || FBTrace.DBG_REGISTRATION)
-                FBTrace.sysout("firebug.main; Extension: " + extName + " EXCEPTION " + err, err);
+            Components.utils.reportError("firebug.main; Extension: " + extName +
+                " EXCEPTION " + err, err);
         }
     });
-}
+};
 
 /**
  * Unregisters and shutdowns specific extension. Registered extensions are unregistered
@@ -152,27 +151,24 @@ Firebug.unregisterExtension = function(extName)
             extConfig.app.shutdown();
 
         delete this.extensions[extName];
-
-        if (FBTrace.DBG_REGISTRATION)
-            FBTrace.sysout("Extension unregistered: " + extName);
     }
     catch (err)
     {
-        if (FBTrace.DBG_ERRORS || FBTrace.DBG_REGISTRATION)
-            FBTrace.sysout("unregisterExtension: " + extName + " EXCEPTION " + err, err);
+        Components.utils.reportError("unregisterExtension: " + extName +
+            " EXCEPTION " + err, err);
     }
-}
+};
 
 Firebug.getExtensionConfig = function(extName)
 {
     return this.extensions[extName];
-}
+};
 
 Firebug.iterateExtensions = function(callback)
 {
     for (var ext in this.extensions)
         callback(ext, this.extensions[ext]);
-}
+};
 
 /**
  * Unregisters and shutdowns all registered extensions. Called by the framework when
@@ -188,6 +184,6 @@ Firebug.unregisterExtensions = function()
         this.unregisterExtension(extName);
 
     this.extensions = {};
-}
+};
 
 // ********************************************************************************************* //

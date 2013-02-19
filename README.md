@@ -1,13 +1,18 @@
 Firebug
 =======
-*Web Development Evolved* [getfirebug.com](getfirebug.com)
+*Web Development Evolved* [getfirebug.com](https://getfirebug.com)
 
 [Download](https://addons.mozilla.org/en-US/firefox/addon/firebug/)
+
+License
+-------
+Firebug is free and open source software distributed under the
+[BSD License](https://github.com/firebug/firebug/blob/master/extension/license.txt).
 
 
 Source Repository Structure
 ---------------------------
-See [more](http://getfirebug.com/wiki/index.php/Source) information about Firebug
+See [more](https://getfirebug.com/wiki/index.php/Source) information about Firebug
 repository structure.
 
 
@@ -51,11 +56,10 @@ about how to provide a patch to Firebug source.
 Further Resources
 -----------------
 
-* Home: [http://getfirebug.com/](http://getfirebug.com/)
-* Blog: [http://blog.getfirebug.com/](http://blog.getfirebug.com/)
-* Twitter: [http://twitter.com/#!/firebugnews](http://twitter.com/#!/firebugnews)
+* Home: [https://getfirebug.com/](https://getfirebug.com/)
+* Blog: [https://blog.getfirebug.com/](https://blog.getfirebug.com/)
+* Twitter: [https://twitter.com/#!/firebugnews](https://twitter.com/#!/firebugnews)
 * Discussion Group: [https://groups.google.com/forum/?fromgroups#!forum/firebug](https://groups.google.com/forum/?fromgroups#!forum/firebug)
-* Wiki: [http://getfirebug.com/wiki](http://getfirebug.com/wiki/index.php/Main_Page)
+* Wiki: [https://getfirebug.com/wiki](https://getfirebug.com/wiki/index.php/Main_Page)
 * Report an Issue: [http://code.google.com/p/fbug/issues/list](http://code.google.com/p/fbug/issues/list)
-* Firebug Extensions: [http://getfirebug.com/wiki/index.php/Firebug_Extensions](http://getfirebug.com/wiki/index.php/Firebug_Extensions)
-
+* Firebug Extensions: [https://getfirebug.com/extensions](https://getfirebug.com/wiki/index.php/Firebug_Extensions)

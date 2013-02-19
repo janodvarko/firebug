@@ -18,7 +18,7 @@ with (Domplate) {
 // ********************************************************************************************* //
 // Constants
 
-const maxWidth = 100
+const maxWidth = 100;
 const maxHeight = 80;
 
 // ********************************************************************************************* //
@@ -115,7 +115,7 @@ var CSSInfoTip = Obj.extend(InfoTip,
                 }
             }
 
-            caption.innerHTML = Locale.$STRF("Dimensions", [w, h]);
+            caption.textContent = Locale.$STRF("Dimensions", [w, h]);
 
             Css.removeClass(innerBox, "infoTipLoading");
         },
@@ -131,9 +131,9 @@ var CSSInfoTip = Obj.extend(InfoTip,
 
             // Display an error in the caption (instead of dimensions).
             if (Str.hasPrefix(img.src, "moz-filedata"))
-                caption.innerHTML = Locale.$STR("firebug.failedToPreviewObjectURL");
+                caption.textContent = Locale.$STR("firebug.failedToPreviewObjectURL");
             else
-                caption.innerHTML = Locale.$STR("firebug.failedToPreviewImageURL");
+                caption.textContent = Locale.$STR("firebug.failedToPreviewImageURL");
 
             var innerBox = img.parentNode;
             Css.removeClass(innerBox, "infoTipLoading");
@@ -149,7 +149,8 @@ var CSSInfoTip = Obj.extend(InfoTip,
            "font-size:14px;",
            "font-size:18px;"
         ];
-        var fontObject = Fonts.getFontInfo(null, null, fontName.replace(/"/g, ""));
+        var fontObject = Fonts.getFontInfo(null, null,
+            fontName.replace(/^(["'])?(.*?)\1$/g, "$2"));
 
         if (FBTrace.DBG_INFOTIP)
         {
@@ -161,7 +162,7 @@ var CSSInfoTip = Obj.extend(InfoTip,
             fontObject: fontObject}, infoTip);
         var styleNode = node.getElementsByClassName("infoTipFontFamilyStyle").item(0);
 
-        styleNode.innerHTML = getFontFaceCSS(fontObject ? fontObject : fontName);
+        styleNode.textContent = getFontFaceCSS(fontObject ? fontObject : fontName);
         return true;
     },
 

@@ -8,14 +8,13 @@ define([
     "firebug/lib/dom",
     "firebug/lib/locale",
     "firebug/lib/css",
+    "firebug/lib/options",
 ],
-function(Obj, Firebug, Events, Menu, Dom, Locale, Css) {
+function(Obj, Firebug, Events, Menu, Dom, Locale, Css, Options) {
 
 // ********************************************************************************************* //
 // Constants
 
-var Cc = Components.classes;
-var Ci = Components.interfaces;
 var Cu = Components.utils;
 
 var MODE_JAVASCRIPT = "js";
@@ -53,7 +52,11 @@ Firebug.CommandEditor = Obj.extend(Firebug.Module,
         if (this.editor)
             return;
 
-        if (typeof(SourceEditor) != "undefined")
+        // The current implementation of the SourceEditor (based on Orion) doesn't
+        // support zooming. So, the TextEditor (based on textarea) can be used
+        // by setting extensions.firebug.enableOrion pref to false.
+        // See issue 5678
+        if (typeof(SourceEditor) != "undefined" && Options.get("enableOrion"))
             this.editor = new SourceEditor();
         else
             this.editor = new TextEditor();
@@ -90,14 +93,6 @@ Firebug.CommandEditor = Obj.extend(Firebug.Module,
         if (!this.editor)
             return;
 
-        try
-        {
-            this.editor.removeEventListener("keypress", this.onKeyPress);
-        }
-        catch (err)
-        {
-        }
-
         this.editor.removeEventListener(CONTEXT_MENU, this.onContextMenu);
         this.editor.removeEventListener(TEXT_CHANGED, this.onTextChanged);
 
@@ -111,18 +106,6 @@ Firebug.CommandEditor = Obj.extend(Firebug.Module,
      */
     onEditorLoad: function()
     {
-        try
-        {
-            // This event is not supported in Fx11, so catch the exception
-            // which is thrown.
-            this.editor.addEventListener("keypress", this.onKeyPress);
-        }
-        catch (err)
-        {
-            if (FBTrace.DBG_ERROR)
-                FBTrace.sysout("commandEditor.onEditorLoad; EXCEPTION " + err, err);
-        }
-
         // xxxHonza: Context menu support is going to change in SourceEditor
         this.editor.addEventListener(CONTEXT_MENU, this.onContextMenu);
         this.editor.addEventListener(TEXT_CHANGED, this.onTextChanged);
@@ -137,24 +120,6 @@ Firebug.CommandEditor = Obj.extend(Firebug.Module,
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
     // Keyboard shortcuts
-
-    onKeyPress: function(event)
-    {
-        Firebug.CommandLine.update(Firebug.currentContext);
-
-        switch (event.keyCode)
-        {
-            case KeyEvent.DOM_VK_RETURN:
-                if (Events.isControl(event))
-                    this.onExecute();
-            break;
-
-            case KeyEvent.DOM_VK_ESCAPE:
-                this.onEscape();
-                event.preventDefault();
-            break;
-        }
-    },
 
     onExecute: function()
     {
@@ -181,23 +146,20 @@ Firebug.CommandEditor = Obj.extend(Firebug.Module,
         if (Firebug.CommandEditor.ignoreChanges)
             return;
 
-        Firebug.CommandLine.onCommandLineInput(event);
+        var context = Firebug.currentContext;
+        Firebug.CommandLine.update(context);
     },
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-    // Contex Menu
+    // Context Menu
 
     onContextMenu: function(event)
     {
         var popup = document.getElementById("fbCommandEditorPopup");
         Dom.eraseNode(popup);
 
-        var browserWindow = Firebug.chrome.window;
-        var commandDispatcher = browserWindow.document.commandDispatcher;
-
         var items = Firebug.CommandEditor.getContextMenuItems();
-        for (var i=0; i<items.length; i++)
-            Menu.createMenuItem(popup, items[i]);
+        Menu.createMenuItems(popup, items);
 
         if (!popup.childNodes.length)
             return;
@@ -257,6 +219,29 @@ Firebug.CommandEditor = Obj.extend(Firebug.Module,
         // TODO xxxHonza
     },
 
+    // returns the applicable commands
+    getExpression: function()
+    {
+        if (this.editor)
+        {
+            if (this.isCollapsed())
+                return this.getText();
+            else
+                return this.editor.getSelectedText();
+        }
+    },
+
+    isCollapsed: function()
+    {
+        var selection;
+        if (this.editor)
+        {
+            selection = this.editor.getSelection(); 
+            return selection.start === selection.end;
+        }
+        return true;
+    },
+
     hasFocus: function()
     {
         try
@@ -269,6 +254,12 @@ Firebug.CommandEditor = Obj.extend(Firebug.Module,
         }
     },
 
+    focus: function()
+    {
+        if (this.editor)
+            this.editor.focus();
+    },
+
     fontSizeAdjust: function(adjust)
     {
         if (!this.editor || !this.editor._view)
@@ -276,9 +267,9 @@ Firebug.CommandEditor = Obj.extend(Firebug.Module,
 
         if (typeof(SourceEditor) != "undefined")
         {
-            var doc = this.editor._view._frame.contentDocument;
-
             // See issue 5488
+            // var doc = this.editor._view._frame.contentDocument;
+
             //doc.body.style.fontSizeAdjust = adjust;
         }
         else
@@ -369,14 +360,35 @@ TextEditor.prototype =
 
     setSelection: function(start, end)
     {
-        this.textBox.setSelection(start, end);
+        this.textBox.setSelectionRange(start, end);
+    },
+
+    getSelection: function()
+    {
+        return {
+            start: this.textBox.selectionStart,
+            end: this.textBox.selectionEnd
+        };
     },
 
     hasFocus: function()
     {
         return this.textBox.getAttribute("focused") == "true";
-    }
-}
+    },
+
+    focus: function()
+    {
+        this.textBox.focus();
+    },
+
+    getSelectedText: function()
+    {
+        var start = this.textBox.selectionStart;
+        var end = this.textBox.selectionEnd;
+
+        return this.textBox.value.substring(start, end);
+    } 
+};
 
 // ********************************************************************************************* //
 // Registration

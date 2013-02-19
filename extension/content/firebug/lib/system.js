@@ -11,7 +11,6 @@ function(FBTrace, Arr) {
 
 var Ci = Components.interfaces;
 var Cc = Components.classes;
-var Cu = Components.utils;
 
 var ioService = Cc["@mozilla.org/network/io-service;1"].getService(Ci.nsIIOService);
 
@@ -37,7 +36,7 @@ System.launchProgram = function(exePath, args)
 {
     try
     {
-        var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+        var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
         file.initWithPath(exePath);
         if (System.getPlatformName() == "Darwin" && file.isDirectory())
         {
@@ -62,26 +61,30 @@ System.launchProgram = function(exePath, args)
 
 System.getIconURLForFile = function(path)
 {
-    var fileHandler = ioService.getProtocolHandler("file").QueryInterface(Ci.nsIFileProtocolHandler);
+    var fileHandler = ioService.getProtocolHandler("file")
+        .QueryInterface(Ci.nsIFileProtocolHandler);
+
     try
     {
-        var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+        var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
         file.initWithPath(path);
-        if ((System.getPlatformName() == "Darwin") && !file.isDirectory() && (path.indexOf(".app/") != -1))
+        if ((System.getPlatformName() == "Darwin") && !file.isDirectory() &&
+            (path.indexOf(".app/") != -1))
         {
             path = path.substr(0,path.lastIndexOf(".app/")+4);
             file.initWithPath(path);
         }
+
         return "moz-icon://" + fileHandler.getURLSpecFromFile(file) + "?size=16";
     }
-    catch(exc)
+    catch (exc)
     {
         if (FBTrace.DBG_ERRORS)
             FBTrace.sysout("getIconURLForFile ERROR "+exc+" for "+path, exc);
     }
 
     return null;
-}
+};
 
 System.copyToClipboard = function(string)
 {
@@ -90,6 +93,44 @@ System.copyToClipboard = function(string)
 
     if (FBTrace.DBG_ERRORS && !string)
         FBTrace.sysout("system.copyToClipboard; " + string, string);
+};
+
+System.getStringDataFromClipboard = function()
+{
+    // https://developer.mozilla.org/en-US/docs/Using_the_Clipboard#Pasting_Clipboard_Contents
+    var clip = Cc["@mozilla.org/widget/clipboard;1"].getService(Ci.nsIClipboard);
+    if (!clip)
+        return false;
+
+    var trans = Cc["@mozilla.org/widget/transferable;1"].createInstance(Ci.nsITransferable);
+    if (!trans)
+        return false;
+
+    if ("init" in trans)
+        trans.init(null);
+
+    trans.addDataFlavor("text/unicode");
+
+    clip.getData(trans, clip.kGlobalClipboard);
+
+    var str = {};
+    var strLength = {};
+
+    try
+    {
+        trans.getTransferData("text/unicode", str, strLength);
+
+        if (str)
+        {
+            str = str.value.QueryInterface(Ci.nsISupportsString);
+            return str.data.substring(0, strLength.value / 2);
+        }
+    }
+    catch (ex)
+    {
+    }
+
+    return false;
 };
 
 // ********************************************************************************************* //
@@ -120,7 +161,7 @@ System.checkFirebugVersion = function(expectedVersion)
     var versionChecker = Cc["@mozilla.org/xpcom/version-comparator;1"].
         getService(Ci.nsIVersionComparator);
     return versionChecker.compare(version, expectedVersion);
-}
+};
 
 // ********************************************************************************************* //
 

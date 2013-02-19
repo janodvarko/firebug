@@ -25,22 +25,28 @@ function runTest()
             {
                 cmdLine.value = "";
                 FBTest.typeCommand(expr);
+                var desc = expr;
+                if (expr.slice(-1) === "x")
+                {
+                    FBTest.synthesizeKey("VK_BACK_SPACE", null, win);
+                    desc += "<backspace>";
+                }
                 FBTest.synthesizeKey("VK_TAB", null, win);
-                FBTest.compare(wanted, cmdLine.value, "Completing \"" + expr + "\" → \"" + wanted + "\"");
+                FBTest.compare(wanted, cmdLine.value, "Completing \"" + desc + "\" → \"" + wanted + "\"");
                 callback();
             }
 
             function testVisibleCase(callback)
             {
                 cmdLine.value = "";
-                FBTest.typeCommand(" obj.ab");
-                FBTest.compare(" obj.abcD", completionBox.value,
+                FBTest.typeCommand(";obj.ab");
+                FBTest.compare(";obj.abcdE", completionBox.value,
                     "Completion box should retain the exact prefix");
                 waitForOpen(function()
                 {
                     var el = popup.querySelector("div[selected=true]");
                     FBTest.ok(el, "The completion popup should open, with something selected");
-                    FBTest.compare(" obj.AbcD", el.textContent,
+                    FBTest.compare("obj.aBcdE", el.textContent,
                         "Completion popup should show the case of the completion");
                     callback();
                 });
@@ -48,9 +54,10 @@ function runTest()
 
             var tests = [
                 ["A", "AbcD"],
-                ["a", "aBcde"],
+                ["a", "aBcdE"],
                 ["AB", "AB"],
-                ["ab", "AbcD"],
+                ["ab", "aBcdE"],
+                ["abx", "AbcD"],
                 ["Abcd", "AbcD"]
             ];
 
@@ -59,6 +66,10 @@ function runTest()
                 var test = tests[i];
                 tasks.push(testExpression, "obj."+test[0], "obj."+test[1]);
             }
+            tasks.push(testExpression, "document.gete", "document.getElementById");
+            tasks.push(testExpression, "decodeu", "decodeURI");
+            tasks.push(testExpression, "obje", "obje");
+            tasks.push(testExpression, "Obje", "Object");
             tasks.push(testVisibleCase);
 
             tasks.run(function()

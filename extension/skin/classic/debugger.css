@@ -136,7 +136,7 @@
     margin-top: 0;
     left: 5px;
     width: 90%;
-    background: -moz-linear-gradient(top, #00CEFD, #00BAF6) no-repeat;
+    background: linear-gradient(to bottom, #00CEFD, #00BAF6) no-repeat;
     border-style: solid;
     border-width: 19px 25px 33px 33px;
     -moz-border-image: url(condCorners.png) 19 25 33 33 stretch;
@@ -164,96 +164,10 @@
 /* * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * */
 
 .upsideDown {
-    background: -moz-linear-gradient(top, #00D1FE, #00ADE6) no-repeat;
+    background: linear-gradient(to bottom, #00D1FE, #00ADE6) no-repeat;
     border-style: solid;
     border-width: 28px 25px 19px 33px;
     -moz-border-image: url(condCornersUps.png) 28 25 19 33 stretch;
-}
-
-/************************************************************************************************/
-
-.breakpointsGroupListBox {
-  overflow: hidden;
-}
-
-.breakpointBlockHead {
-    position: relative;
-    padding-top: 4px;
-}
-
-.breakpointBlockHead > .checkbox {
-    margin-right: 4px;
-}
-
-.breakpointBlockHead > .objectLink-sourceLink {
-    top: 4px;
-    right: 20px;
-    background-color: #FFFFFF; /* issue 3308 */
-}
-
-.breakpointBlockHead > .closeButton {
-    position: absolute;
-    top: 2px;
-    right: 2px;
-}
-
-.breakpointCheckbox {
-    margin-top: 0;
-    vertical-align: top;
-}
-
-.breakpointName {
-    margin-left: 4px;
-    font-weight: bold;
-}
-
-.breakpointRow[aria-checked="false"] > .breakpointBlockHead > *,
-.breakpointRow[aria-checked="false"] > .breakpointCode {
-    opacity: 0.5;
-}
-
-.breakpointRow[aria-checked="false"] .breakpointCheckbox,
-.breakpointRow[aria-checked="false"] .objectLink-sourceLink,
-.breakpointRow[aria-checked="false"] .closeButton,
-.breakpointRow[aria-checked="false"] .breakpointMutationType {
-    opacity: 1.0 !important;
-}
-
-.breakpointCode {
-    overflow: hidden;
-    white-space: nowrap;
-    padding-left: 24px;
-    padding-bottom: 2px;
-    border-bottom: 1px solid #D7D7D7;
-    font-family: monospace;
-    color: DarkGreen;
-}
-
-.breakpointCondition {
-    white-space: nowrap;
-    padding-left: 24px;
-    padding-bottom: 2px;
-    border-bottom: 1px solid #D7D7D7;
-    font-family: monospace;
-    color: Gray;
-}
-
-.breakpointBlock-breakpoints > .groupHeader {
-    display: none;
-}
-
-.breakpointBlock-monitors > .breakpointCode {
-    padding: 0;
-}
-
-.breakpointBlock-errorBreakpoints .breakpointCheckbox,
-.breakpointBlock-monitors .breakpointCheckbox {
-    display: none;
-}
-
-.breakpointHeader {
-    margin: 0 !important;
-    border-top: none !important;
 }
 
 /*************************************************************************************************/

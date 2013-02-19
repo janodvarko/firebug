@@ -174,7 +174,7 @@ Url.isSystemPage = function(win)
         FBTrace.sysout("Url.isSystemPage; EXCEPTION document not ready?: " + exc);
         return false;
     }
-}
+};
 
 Url.isSystemStyleSheet = function(sheet)
 {
@@ -195,7 +195,7 @@ Url.getURIHost = function(uri)
     {
         return "";
     }
-}
+};
 
 Url.isLocalURL = function(url)
 {
@@ -253,7 +253,7 @@ Url.getLocalSystemURI = function(url)
         if (FBTrace.DBG_ERRORS)
             FBTrace.sysout("getLocalSystemURI failed for "+url);
     }
-}
+};
 
 /*
  * Mozilla native path for local URL
@@ -269,14 +269,14 @@ Url.getLocalOrSystemPath = function(url, allowDirectories)
         else
             return file && !file.isDirectory() && file.path;
     }
-}
+};
 
 Url.getLocalOrSystemFile = function(url)
 {
     var uri = Url.getLocalSystemURI(url);
     if (uri instanceof Ci.nsIFileURL)
         return uri.file;
-}
+};
 
 Url.getURLFromLocalFile = function(file)
 {
@@ -290,10 +290,10 @@ Url.getDataURLForContent = function(content, url)
 {
     // data:text/javascript;fileName=x%2Cy.js;baseLineNumber=10,<the-url-encoded-data>
     var uri = "data:text/html;";
-    uri += "fileName="+encodeURIComponent(url)+ ","
+    uri += "fileName="+encodeURIComponent(url)+ ",";
     uri += encodeURIComponent(content);
     return uri;
-},
+};
 
 Url.getDomain = function(url)
 {
@@ -311,6 +311,20 @@ Url.getPrettyDomain = function(url)
 {
     var m = /[^:]+:\/{1,3}(www\.)?([^\/]+)/.exec(url);
     return m ? m[2] : "";
+};
+
+/**
+ * Returns the base URL for a given window
+ * @param {Object} win DOM window
+ * @returns {String} Base URL
+ */
+Url.getBaseURL = function(win)
+{
+    if (!win)
+        return;
+
+    var base = win.document.getElementsByTagName("base").item(0);
+    return base ? base.href : win.location.href;
 };
 
 Url.absoluteURL = function(url, baseURL)
@@ -371,9 +385,9 @@ Url.absoluteURLWithDots = function(url, baseURL)
         var parts = tail.split("/");
         return head + parts.slice(0, parts.length-1).join("/") + "/" + url;
     }
-}
+};
 
-var reChromeCase = /chrome:\/\/([^/]*)\/(.*?)$/;
+var reChromeCase = /chrome:\/\/([^\/]*)\/(.*?)$/;
 Url.normalizeURL = function(url)  // this gets called a lot, any performance improvement welcome
 {
     if (!url)
@@ -382,12 +396,12 @@ Url.normalizeURL = function(url)  // this gets called a lot, any performance imp
     if (url.length < 255) // guard against monsters.
     {
         // Replace one or more characters that are not forward-slash followed by /.., by space.
-        url = url.replace(/[^/]+\/\.\.\//, "", "g");
+        url = url.replace(/[^\/]+\/\.\.\//, "", "g");
         // Issue 1496, avoid #
         url = url.replace(/#.*/,"");
         // For some reason, JSDS reports file URLs like "file:/" instead of "file:///", so they
         // don't match up with the URLs we get back from the DOM
-        url = url.replace(/file:\/([^/])/g, "file:///$1");
+        url = url.replace(/file:\/([^\/])/g, "file:///$1");
         // For script tags inserted dynamically sometimes the script.fileName is bogus
         url = url.replace(/[^\s]*\s->\s/, "");
 
@@ -508,6 +522,17 @@ Url.reEncodeURL = function(file, text, noLimit)
     return url;
 };
 
+/**
+ * Extracts the URL from a CSS URL definition.
+ * Example: url(../path/to/file) => ../path/to/file
+ * @param {String} url CSS URL definition
+ * @returns {String} Extracted URL
+ */
+Url.extractFromCSS = function(url)
+{
+    return url.replace(/^url\(["']?(.*?)["']?\)$/, "$1");
+};
+
 Url.makeURI = function(urlString)
 {
     try
@@ -524,7 +549,7 @@ Url.makeURI = function(urlString)
 
         return false;
     }
-}
+};
 
 /**
  * Converts resource: to file: Url.
@@ -541,7 +566,7 @@ Url.resourceToFile = function(resourceURL)
 
     var path = resHandler.getSubstitution(sub).spec;
     return path + split.join("/");
-}
+};
 
 // ********************************************************************************************* //
 // Registration

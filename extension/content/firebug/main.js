@@ -24,7 +24,7 @@ if (FBTrace.DBG_INITIALIZE || FBTrace.DBG_MODULES)
 try
 {
     // xxxHonza: temporary hack for Crossfire to provide custom set of modules.
-    var prefService = Cc["@mozilla.org/preferences-service;1"].getService(Ci.nsIPrefBranch2);
+    var prefService = Cc["@mozilla.org/preferences-service;1"].getService(Ci.nsIPrefBranch);
     var value = prefService.getCharPref("extensions.firebug.defaultModuleList");
     if (value)
     {
@@ -64,7 +64,7 @@ require.load = function(context, fullName, url)
     }
 
     return originalLoad.apply(require, [context, fullName, url]);
-}
+};
 
 // ********************************************************************************************* //
 
@@ -100,7 +100,7 @@ require(config, modules, function(ChromeFactory, FBL, Firebug, Browser)
 
                 if (prevResourcesReady)
                     prevResourcesReady(isReady);
-            }
+            };
         }
         else
         {
@@ -142,7 +142,7 @@ function onModulesLoaded(ChromeFactory, FBL, Firebug, Browser)
     Browser.onDebug = function()
     {
         FBTrace.sysout.apply(FBTrace, arguments);
-    }
+    };
 
     Firebug.Options.initialize(prefDomain);
 
@@ -162,9 +162,6 @@ function onModulesLoaded(ChromeFactory, FBL, Firebug, Browser)
         window.FBL.legacyPatch(FBL, Firebug);
     }
 
-    if (FBTrace.DBG_MODULES)
-        require.analyzeDependencyTree();
-
     if (!window.panelBarWaiter && FBTrace.DBG_ERRORS)
         FBTrace.sysout("main; ERROR window.panelBarWaiter is not available " +
             ", Firebug already initialized: " + Firebug.isInitialized);
@@ -177,4 +174,3 @@ function onModulesLoaded(ChromeFactory, FBL, Firebug, Browser)
 })();
 
 // ********************************************************************************************* //
-

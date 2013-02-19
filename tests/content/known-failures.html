@@ -1,0 +1,53 @@
+﻿<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN"
+    "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd">
+<html>
+<head>
+    <title>Firebug 1.10 Test List</title>
+    <meta http-equiv="Content-Type" content="text/html; charset=UTF-8"/>
+    <script type="text/javascript" src="_common/testListUtils.js"></script>
+    <link rel="stylesheet" href="_common/testConsole.css" type="text/css"/>
+    <link rel="stylesheet" href="_common/testList.css" type="text/css"/>
+    <link rel="stylesheet" href="_common/testResult.css" type="text/css"/>
+    <link rel="stylesheet" href="_common/tabView.css" type="text/css"/>
+</head>
+<body>
+
+<script type="text/javascript">
+/**
+ * Root directory of the test tree. If it's empty, the parent directory of this file
+ * is used as the test root directory.
+ */
+var driverBaseURI = getDriverBaseURI();
+var serverURI = driverBaseURI;
+
+/**
+ * List of registered tests.
+ * @param: {String} group       Name of the group where the test belongs to.
+ * @param: {String} uri         Relative location of the test file.
+ * @param: {String} desc        Test description.
+ * @param: {String} category    Test category, this can be set to:
+ *                              "passes": (default) - a test must pass, otherwise it's a blocking bug.
+ *                              "fails": - it's not blocking bug if the test fails.
+ * @param: {String} testPage    Relative location of the test page [optional]. This is useful for manual
+ *                              opening of the test page from FBTest console (context menu "Open Test Page").
+ * @param: {String} os          Target OS [optional]. Used to specify target OS where the test
+ *                              should be applied. Can be combination of following: win|mac|linux
+ *                              (separated by '|'). If not specified, the test is intended for all.
+ *                              Test, which is not targeted for the current OS is marked as "fails".
+ */
+var testList = [
+    //{group: "script",             uri: "script/3985/issue3985.js",                desc: "Can't break on code inserted twice using iframes, in one iframe", testPage: "script/3985/issue3985.html"},
+    //{group: "script",             uri: "script/4932/issue4932.js",                desc: "The Script panel shows No Javascript on this page even if they are scripts within an iframe", testPage: "script/4932/issue4932.html"},
+    //{group: "net",                uri: "net/4905/issue4905.js",                   desc: "Show the \"Connection\" header in the network/headers part", testPage: "net/4905/issue4905.html" },
+    //{group: "css",                uri: "css/4180/issue4180.js",                   desc: "Incorrect background value order", testPage: "css/4180/issue4180.html"},
+];
+</script>
+
+<h1>Firebug 1.10 Test List</h1>
+<div><span>Test driver base URI: </span><span id="driverURI"></span></div>
+<div><span>Test case base URI: </span><span id="testcaseURI"></span></div>
+<h2>Test Groups</h2>
+<div id="tests"></div>
+
+</body>
+</html>

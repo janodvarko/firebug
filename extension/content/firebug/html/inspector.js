@@ -8,6 +8,7 @@ define([
     "firebug/lib/locale",
     "firebug/lib/events",
     "firebug/lib/wrapper",
+    "firebug/lib/array",
     "firebug/lib/css",
     "firebug/lib/dom",
     "firebug/lib/xml",
@@ -15,15 +16,16 @@ define([
     "firebug/lib/system",
     "firebug/html/highlighterCache"
 ],
-function(Obj, Firebug, Firefox, FirebugReps, Locale, Events, Wrapper, Css, Dom, Xml,
+function(Obj, Firebug, Firefox, FirebugReps, Locale, Events, Wrapper, Arr, Css, Dom, Xml,
     Win, System, HighlighterCache) {
 
 // ********************************************************************************************* //
 // Constants
 
 const inspectDelay = 200;
-const highlightCSS = "chrome://firebug/content/html/highlighter.css";
+const highlightCssUrl = "chrome://firebug/content/html/highlighter.css";
 const ident = HighlighterCache.ident;
+const Cu = Components.utils;
 
 // ********************************************************************************************* //
 // Globals
@@ -70,15 +72,21 @@ Firebug.Inspector = Obj.extend(Firebug.Module,
         var i, elt, elementLen, oldContext, usingColorArray;
         var highlighter = highlightType ? getHighlighter(highlightType) : this.defaultHighlighter;
 
-        if (!elementArr || !FirebugReps.Arr.isArray(elementArr, context.window))
+        if (!elementArr || !Arr.isArrayLike(elementArr))
         {
+            // Not everything that comes through here is wrapped - fix that.
+            elementArr = Wrapper.wrapObject(elementArr);
+
             // highlight a single element
             if (!elementArr || !Dom.isElement(elementArr) ||
-                (Wrapper.getContentView(elementArr) &&
-                    !Xml.isVisible(Wrapper.getContentView(elementArr))))
+                (typeof elementArr === "object" && !Xml.isVisible(elementArr)))
             {
-                elementArr = (elementArr && elementArr.nodeType == Node.TEXT_NODE) ?
-                    elementArr.parentNode : null;
+                if (elementArr && Dom.isRange(elementArr))
+                    elementArr = elementArr;
+                else if (elementArr && elementArr.nodeType == Node.TEXT_NODE)
+                    elementArr = elementArr.parentNode;
+                else
+                    elementArr = null;
             }
 
             if (elementArr && context && context.highlightTimeout)
@@ -100,7 +108,7 @@ Firebug.Inspector = Obj.extend(Firebug.Module,
 
             if (elementArr)
             {
-                if (!isVisibleElement(elementArr))
+                if (elementArr.nodeName && !isVisibleElement(elementArr))
                     highlighter.unhighlight(context);
                 else if (context && context.window && context.window.document)
                     highlighter.highlight(context, elementArr, boxFrame, colorObj, false);
@@ -120,12 +128,6 @@ Firebug.Inspector = Obj.extend(Firebug.Module,
                     if (oldContext.window && oldContext.window.document)
                     {
                         highlighter.unhighlight(oldContext);
-
-                        if (oldContext.inspectorMouseMove)
-                        {
-                            Events.removeEventListener(oldContext.window.document, "mousemove",
-                                oldContext.inspectorMouseMove, true);
-                        }
                     }
                 }, inspectDelay);
             }
@@ -140,13 +142,14 @@ Firebug.Inspector = Obj.extend(Firebug.Module,
             }
 
             this.clearAllHighlights();
-            usingColorArray = FirebugReps.Arr.isArray(colorObj, context.window);
+            usingColorArray = Arr.isArray(colorObj);
 
             if (context && context.window && context.window.document)
             {
                 for (i=0, elementLen=elementArr.length; i<elementLen; i++)
                 {
-                    elt = elementArr[i];
+                    // Like above, wrap things.
+                    elt = Wrapper.wrapObject(elementArr[i]);
 
                     if (elt && elt instanceof HTMLElement)
                     {
@@ -215,7 +218,7 @@ Firebug.Inspector = Obj.extend(Firebug.Module,
         this.inspecting = true;
         this.inspectingContext = context;
 
-        Firebug.chrome.setGlobalAttribute("cmd_toggleInspecting", "checked", "true");
+        Firebug.chrome.setGlobalAttribute("cmd_firebug_toggleInspecting", "checked", "true");
         this.attachInspectListeners(context);
 
         var inspectingPanelName = this._resolveInspectingPanelName(context);
@@ -246,7 +249,7 @@ Firebug.Inspector = Obj.extend(Firebug.Module,
      */
     inspectNode: function(node)
     {
-        if (node && node.nodeType != 1)
+        if (node && node.nodeType != Node.ELEMENT_NODE)
             node = node.parentNode;
 
         if (node && Firebug.shouldIgnore(node) && !node.fbProxyFor)
@@ -313,7 +316,7 @@ Firebug.Inspector = Obj.extend(Firebug.Module,
         if (!waitForClick)
             this.detachClickInspectListeners(context.window);
 
-        Firebug.chrome.setGlobalAttribute("cmd_toggleInspecting", "checked", "false");
+        Firebug.chrome.setGlobalAttribute("cmd_firebug_toggleInspecting", "checked", "false");
 
         this.inspecting = false;
 
@@ -763,7 +766,7 @@ Firebug.Inspector = Obj.extend(Firebug.Module,
         // The panel can be null (if disabled) so use the global context.
         // var context = Firebug.currentContext;
         // var disabled = (context && context.loaded) ? false : true;
-        // Firebug.chrome.setGlobalAttribute("cmd_toggleInspecting", "disabled", disabled);
+        // Firebug.chrome.setGlobalAttribute("cmd_firebug_toggleInspecting", "disabled", disabled);
     },
 
     /**
@@ -773,7 +776,7 @@ Firebug.Inspector = Obj.extend(Firebug.Module,
     loadedContext: function(context)
     {
         // See the comment in showPanel.
-        // Firebug.chrome.setGlobalAttribute("cmd_toggleInspecting", "disabled", "false");
+        // Firebug.chrome.setGlobalAttribute("cmd_firebug_toggleInspecting", "disabled", "false");
     },
 
     /**
@@ -788,11 +791,8 @@ Firebug.Inspector = Obj.extend(Firebug.Module,
             this.highlightObject(null);
             this.defaultHighlighter = value ? getHighlighter("boxModel") : getHighlighter("frame");
         }
-        else if (name == "showQuickInfoBox")
+        else if(name == "showQuickInfoBox")
         {
-            if (quickInfoBox.boxEnabled && !value)
-                quickInfoBox.hide();
-
             quickInfoBox.boxEnabled = value;
         }
     },
@@ -829,10 +829,23 @@ Firebug.Inspector = Obj.extend(Firebug.Module,
      */
     hideQuickInfoBox: function()
     {
-        quickInfoBox.hide();
+        var qiBox = Firebug.chrome.$("fbQuickInfoPanel");
+
+        if (qiBox.state==="open")
+            quickInfoBox.hide();
 
         this.inspectNode(null);
+    },
+
+    /**
+     * Pass all quick info box events to quickInfoBox.handleEvent() for handling.
+     * @param {Event} event Event to handle
+     */
+    quickInfoBoxHandler: function(event)
+    {
+        quickInfoBox.handleEvent(event);
     }
+
 });
 
 // ********************************************************************************************* //
@@ -1045,7 +1058,7 @@ function getImageMapHighlighter(context)
                 canvas = null;
                 ctx = null;
             }
-        }
+        };
     }
 
     return context.imageMapHighlighter;
@@ -1059,6 +1072,8 @@ var quickInfoBox =
     dragging: false,
     storedX: null,
     storedY: null,
+    prevX: null,
+    prevY: null,
 
     show: function(element)
     {
@@ -1120,16 +1135,76 @@ var quickInfoBox =
     hide: function()
     {
         // if mouse is over panel defer hiding to mouseout to not cause flickering
+        if (this.mouseover || this.dragging)
+        {
+            this.needsToHide = true;
+            return;
+        }
+
         var qiBox = Firebug.chrome.$("fbQuickInfoPanel");
-        if (qiBox.state==="closed")
-            return;
 
-        if (qiBox.mozMatchesSelector(":hover"))
-            return;
-
-        this.storedX = qiBox.boxObject.screenX;
-        this.storedY = qiBox.boxObject.screenY;
+        this.prevX = null;
+        this.prevY = null;
+        this.needsToHide = false;
         qiBox.hidePopup();
+    },
+
+    handleEvent: function(event)
+    {
+        switch (event.type)
+        {
+            case "mousemove":
+                if(!this.dragging)
+                    return;
+
+                var diffX, diffY,
+                    boxX = this.qiBox.screenX,
+                    boxY = this.qiBox.screenY,
+                    x = event.screenX,
+                    y = event.screenY;
+
+                diffX = x - this.prevX;
+                diffY = y - this.prevY;
+
+                this.qiBox.moveTo(boxX + diffX, boxY + diffY);
+
+                this.prevX = x;
+                this.prevY = y;
+                this.storedX = boxX;
+                this.storedY = boxY;
+                break;
+            case "mousedown":
+                this.qiPanel = Firebug.chrome.$("fbQuickInfoPanel");
+                this.qiBox = this.qiPanel.boxObject;
+                Events.addEventListener(this.qiPanel, "mousemove", this, true);
+                Events.addEventListener(this.qiPanel, "mouseup", this, true);
+                this.dragging = true;
+                this.prevX = event.screenX;
+                this.prevY = event.screenY;
+                break;
+            case "mouseup":
+                Events.removeEventListener(this.qiPanel, "mousemove", this, true);
+                Events.removeEventListener(this.qiPanel, "mouseup", this, true);
+                this.qiPanel = this.qiBox = null;
+                this.prevX = this.prevY = null;
+                this.dragging = false;
+                break;
+            // this is a hack to find when mouse enters and leaves panel
+            // it requires that #fbQuickInfoPanel have border
+            case "mouseover":
+                if(this.dragging)
+                    return;
+                this.mouseover = true;
+                break;
+            case "mouseout":
+                if(this.dragging)
+                    return;
+                this.mouseover = false;
+                // if hiding was defered because mouse was over panel hide it
+                if (this.needsToHide && event.target.nodeName == "panel")
+                    this.hide();
+                break;
+        }
     },
 
     addRows: function(domBase, vbox, attribs, computedStyle)
@@ -1236,22 +1311,24 @@ Firebug.Inspector.FrameHighlighter.prototype =
             var bgDiv = highlighter.firstChild;
             var css = moveImp(null, x, y) + resizeImp(null, w, h);
 
-            cs = body.ownerDocument.defaultView.getComputedStyle(element, null);
+            if (Dom.isElement(element))
+            {
+                cs = body.ownerDocument.defaultView.getComputedStyle(element, null);
 
-            if (cs.MozTransform && cs.MozTransform != "none")
-                css += "-moz-transform: "+cs.MozTransform+"!important;" +
-                       "-moz-transform-origin: "+cs.MozTransformOrigin+"!important;";
-            if (cs.borderRadius)
-                css += "border-radius: "+cs.borderRadius+"!important;";
-            if (cs.borderTopLeftRadius)
-                css += "border-top-left-radius: "+cs.borderTopLeftRadius+"!important;";
-            if (cs.borderTopRightRadius)
-                css += "border-top-right-radius: "+cs.borderTopRightRadius+"!important;";
-            if (cs.borderBottomRightRadius)
-                css += "border-bottom-right-radius: "+cs.borderBottomRightRadius+"!important;";
-            if (cs.borderBottomLeftRadius)
-                css += "border-bottom-left-radius: "+cs.borderBottomLeftRadius+"!important;";
-
+                if (cs.transform && cs.transform != "none")
+                    css += "transform: " + cs.transform + " !important;" +
+                           "transform-origin: " + cs.transformOrigin + " !important;";
+                if (cs.borderRadius)
+                    css += "border-radius: " + cs.borderRadius + " !important;";
+                if (cs.borderTopLeftRadius)
+                    css += "border-top-left-radius: " + cs.borderTopLeftRadius + " !important;";
+                if (cs.borderTopRightRadius)
+                    css += "border-top-right-radius: " + cs.borderTopRightRadius + " !important;";
+                if (cs.borderBottomRightRadius)
+                    css += "border-bottom-right-radius: " + cs.borderBottomRightRadius + " !important;";
+                if (cs.borderBottomLeftRadius)
+                    css += "border-bottom-left-radius: " + cs.borderBottomLeftRadius + " !important;";
+            }
             css += "box-shadow: 0 0 2px 2px "+
                 (colorObj && colorObj.border ? colorObj.border : "highlight")+"!important;";
 
@@ -1274,7 +1351,7 @@ Firebug.Inspector.FrameHighlighter.prototype =
                     FBTrace.sysout("FrameHighlighter needsAppend: " + highlighter.ownerDocument.documentURI +
                         " !?= " + body.ownerDocument.documentURI, highlighter);
 
-                attachStyles(context, body);
+                attachStyles(context, body.ownerDocument);
 
                 try
                 {
@@ -1288,7 +1365,7 @@ Firebug.Inspector.FrameHighlighter.prototype =
                 }
 
                 // otherwise the proxies take up screen space in browser.xul
-                if (element.ownerDocument.contentType.indexOf("xul") === -1)
+                if (element.ownerDocument && element.ownerDocument.contentType.indexOf("xul") === -1)
                     createProxiesForDisabledElements(body);
             }
         }
@@ -1461,7 +1538,7 @@ BoxModelHighlighter.prototype =
                 moveImp(nodes.lines.top, 0, top);
                 moveImp(nodes.lines.right, left + width, 0);
                 moveImp(nodes.lines.bottom, 0, top + height);
-                moveImp(nodes.lines.left, left, 0)
+                moveImp(nodes.lines.left, left, 0);
             }
 
             var body = getNonFrameBody(element);
@@ -1493,7 +1570,7 @@ BoxModelHighlighter.prototype =
 
             if (needsAppend)
             {
-                attachStyles(context, body);
+                attachStyles(context, body.ownerDocument);
                 body.appendChild(nodes.offset);
             }
 
@@ -1624,18 +1701,34 @@ BoxModelHighlighter.prototype =
 
 function getNonFrameBody(elt)
 {
+    if (Dom.isRange(elt))
+    {
+        elt = elt.commonAncestorContainer;
+    }
     var body = Dom.getBody(elt.ownerDocument);
     return (body.localName && body.localName.toUpperCase() === "FRAMESET") ? null : body;
 }
 
-function attachStyles(context, body)
+function attachStyles(context, doc)
 {
-    var doc = body.ownerDocument;
-    if (!context.highlightStyle)
-        context.highlightStyle = Css.createStyleSheet(doc, highlightCSS);
+    if (!context.highlightStyleCache)
+        context.highlightStyleCache = new WeakMap();
+    var highlightStyleCache = context.highlightStyleCache;
 
-    if (!context.highlightStyle.parentNode || context.highlightStyle.ownerDocument != doc)
-        Css.addStyleSheet(body.ownerDocument, context.highlightStyle);
+    var style;
+    if (highlightStyleCache.has(doc))
+    {
+        style = highlightStyleCache.get(doc);
+    }
+    else
+    {
+        style = Css.createStyleSheet(doc, highlightCssUrl);
+        highlightStyleCache.set(doc, style);
+    }
+
+    // Cater for the possiblity that someone might have removed our stylesheet.
+    if (!style.parentNode)
+        Css.addStyleSheet(doc, style);
 }
 
 function createProxiesForDisabledElements(body)
@@ -1659,9 +1752,9 @@ function createProxiesForDisabledElements(body)
         div.className = "firebugResetStyles fbProxyElement";
 
         css = moveImp(null, rect.left, rect.top + body.scrollTop) + resizeImp(null, rect.width, rect.height);
-        if (cs.MozTransform && cs.MozTransform != "none")
-          css += "-moz-transform:" + cs.MozTransform + "!important;" +
-                 "-moz-transform-origin:" + cs.MozTransformOrigin + "!important;";
+        if (cs.transform && cs.transform != "none")
+            css += "transform:" + cs.transform + " !important;" +
+                   "transform-origin:" + cs.transformOrigin + " !important;";
         if (cs.borderRadius)
             css += "border-radius:" + cs.borderRadius + " !important;";
         if (cs.borderTopLeftRadius)

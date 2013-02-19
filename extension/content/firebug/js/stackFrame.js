@@ -27,9 +27,10 @@ StackFrame.getStackTrace = Deprecated.deprecated("name change for self-documenta
  */
 StackFrame.getCorrectedStackTrace = function(frame, context)
 {
+    var trace = null;
     try
     {
-        var trace = new StackFrame.StackTrace();
+        trace = new StackFrame.StackTrace();
         var newestFrame = null;
         var nextOlderFrame = null;
         for (; frame && frame.isValid; frame = frame.callingFrame)
@@ -62,11 +63,11 @@ StackFrame.getCorrectedStackTrace = function(frame, context)
         if (trace.frames.length > 100)  // TODO in the loop above
         {
             var originalLength = trace.frames.length;
-            trace.frames.splice(50, originalLength - 100);
+            trace.frames.splice(50, originalLength - 100, null);
             var excuse = "(eliding "+(originalLength - 100)+" frames)";
 
             trace.frames[50] = new StackFrame.StackFrame({href: excuse}, 0, excuse,
-                [], null, null, context);
+                [], null, null, context, newestFrame);
         }
 
     }
@@ -114,7 +115,7 @@ StackFrame.getStackFrame = function(frame, context, newestFrameXB)
                     script: frame.script, fncSpec: fncSpec, analyzer: analyzer});
 
             return new StackFrame.StackFrame(sourceFile, lineNo, fncSpec.name, fncSpec.args, frame,
-                null, sourceFile.context, newestFrameXB);
+                frame.pc, sourceFile.context, newestFrameXB);
         }
         else
         {
@@ -124,13 +125,13 @@ StackFrame.getStackFrame = function(frame, context, newestFrameXB)
 
             var script = frame.script;
             return new StackFrame.StackFrame({href: Url.normalizeURL(script.fileName)}, frame.line,
-                script.functionName, [], frame, null, context, newestFrameXB);
+                script.functionName, [], frame, frame.pc, context, newestFrameXB);
         }
     }
     catch (exc)
     {
         if (FBTrace.DBG_STACK)
-            FBTrace.sysout("getCorrectedStackTrace fails: "+exc, exc);
+            FBTrace.sysout("getStackFrame fails: "+exc, exc);
         return null;
     }
 };
@@ -240,7 +241,7 @@ StackFrame.StackFrame.prototype =
 
     signature: function()
     {
-        return this.script.tag +"." + this.pc;
+        return this.script.tag + "." + this.pc;
     },
 
     getThisValue: function()
@@ -279,13 +280,13 @@ StackFrame.StackFrame.prototype =
             // in all cases.
             if (scope.jsClassName == "Call")
             {
-                scopeVars = Wrapper.unwrapIValueObject(scope, viewChrome)
-                scopeVars.toString = function() {return Locale.$STR("Closure Scope");}
+                scopeVars = Wrapper.unwrapIValueObject(scope, viewChrome);
+                scopeVars.toString = function() { return Locale.$STR("Closure Scope"); };
             }
             else if (scope.jsClassName == "Block")
             {
-                scopeVars = Wrapper.unwrapIValueObject(scope, viewChrome)
-                scopeVars.toString = function() {return Locale.$STR("Block Scope");}
+                scopeVars = Wrapper.unwrapIValueObject(scope, viewChrome);
+                scopeVars.toString = function() { return Locale.$STR("Block Scope"); };
             }
             else
             {
@@ -359,7 +360,7 @@ StackFrame.parseToStackFrame = function(line, context) // function name (arg, ar
             return new StackFrame.StackFrame({href:m[2]}, m[3], m[1], [], null, null, context);
         }
     }
-}
+};
 
 StackFrame.parseToStackTrace = function(stack, context)
 {
@@ -376,7 +377,7 @@ StackFrame.parseToStackTrace = function(stack, context)
              trace.frames.push(frame);
      }
      return trace;
-}
+};
 
 StackFrame.cleanStackTraceOfFirebug = function(trace)
 {
@@ -395,7 +396,7 @@ StackFrame.cleanStackTraceOfFirebug = function(trace)
             trace = undefined;
     }
     return trace;
-}
+};
 
 StackFrame.getStackDump = function()
 {
@@ -432,7 +433,7 @@ StackFrame.getStackSourceLink = function()
         }
     }
     return StackFrame.getFrameSourceLink(frame);
-}
+};
 
 StackFrame.getFrameSourceLink = function(frame)
 {
@@ -570,7 +571,7 @@ StackFrame.getFunctionName = function(script, context, frame, noArgs)
         FBTrace.sysout("getFunctionName "+script.tag+" ="+name+"\n");
 
     return name;
-}
+};
 
 StackFrame.getDisplayName = function(scope, script)
 {
@@ -591,7 +592,7 @@ StackFrame.getDisplayName = function(scope, script)
         if (FBTrace.DBG_STACK)
             FBTrace.sysout("stackFrame.getDisplayName; EXCEPTION " + err, err);
     }
-}
+};
 
 StackFrame.guessFunctionName = function(url, lineNo, context)
 {
@@ -601,7 +602,7 @@ StackFrame.guessFunctionName = function(url, lineNo, context)
             return StackFrame.guessFunctionNameFromLines(url, lineNo, context.sourceCache);
     }
     return "? in "+Url.getFileName(url)+"@"+lineNo;
-}
+};
 
 var reGuessFunction = /['"]?([$0-9A-Za-z_]+)['"]?\s*[:=]\s*(function|eval|new Function)/;
 var reFunctionArgNames = /function ([^(]*)\(([^)]*)\)/;
@@ -636,22 +637,21 @@ StackFrame.guessFunctionNameFromLines = function(url, lineNo, sourceCache)
         }
     }
     return "(?)";
-}
+};
 
 // Mozilla
 StackFrame.getFunctionArgValues = function(frame)
 {
-    if (frame.isValid && frame.scope.jsClassName == "Call")
-        var values = StackFrame.getArgumentsFromCallScope(frame);
-    else
-        var values = StackFrame.getArgumentsFromObjectScope(frame);
+    var values = (frame.isValid && frame.scope.jsClassName == "Call") ?
+        StackFrame.getArgumentsFromCallScope(frame) :
+        StackFrame.getArgumentsFromObjectScope(frame);
 
     if (FBTrace.DBG_STACK)
         FBTrace.sysout("stackFrame.getFunctionArgValues "+frame+" scope: "+frame.scope.jsClassName,
             {values: values});
 
     return values;
-}
+};
 
 // Mozilla
 StackFrame.getArgumentsFromObjectScope = function(frame)
@@ -717,7 +717,7 @@ StackFrame.resumeShowStackTrace = function()
     if (saveShowStackTrace)
     {
         Firebug.showStackTrace = saveShowStackTrace;
-        delete saveShowStackTrace;
+        saveShowStackTrace = null;
     }
 };
 

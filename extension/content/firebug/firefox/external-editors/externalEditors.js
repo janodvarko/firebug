@@ -28,9 +28,8 @@ const Ci = Components.interfaces;
 
 const DirService = Xpcom.CCSV("@mozilla.org/file/directory_service;1",
     "nsIDirectoryServiceProvider");
-const NS_OS_TEMP_DIR = "TmpD"
+const NS_OS_TEMP_DIR = "TmpD";
 const nsIFile = Ci.nsIFile;
-const nsILocalFile = Ci.nsILocalFile;
 const nsISafeOutputStream = Ci.nsISafeOutputStream;
 const nsIURI = Ci.nsIURI;
 
@@ -52,7 +51,7 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
     {
         Firebug.Module.initializeUI.apply(this, arguments);
 
-        Firebug.registerUIListener(this)
+        Firebug.registerUIListener(this);
         this.loadExternalEditors();
     },
 
@@ -100,19 +99,19 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
         var prefDomain = Firebug.Options.getPrefDomain();
         var list = Firebug.Options.getPref(prefDomain, prefName).split(",");
 
-        for (var i = 0; i < list.length; ++i)
+        for (var i=0; i<list.length; ++i)
         {
             var editorId = list[i];
             if (!editorId || editorId == "")
                 continue;
 
             var item = { id: editorId };
-            for (var j = 0; j < editorPrefNames.length; ++j)
+            for (var j=0; j<editorPrefNames.length; ++j)
             {
                 try
                 {
-                    item[editorPrefNames[j]] = Firebug.Options.getPref(prefDomain, prefName+"."+
-                        editorId+"."+editorPrefNames[j]);
+                    item[editorPrefNames[j]] = Firebug.Options.getPref(prefDomain,
+                        prefName + "." + editorId + "." + editorPrefNames[j]);
                 }
                 catch(exc)
                 {
@@ -161,11 +160,10 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
 
     onEditorsShowing: function(popup)
     {
-        var editors = this.getRegisteredEditors();
-
         Dom.eraseNode(popup);
 
-        for( var i = 0; i < editors.length; ++i )
+        var editors = this.getRegisteredEditors();
+        for (var i=0; i<editors.length; ++i)
         {
             if (editors[i] == "-")
             {
@@ -228,7 +226,8 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
         }
         else if (Css.hasClass(target, "stackFrameLink"))
         {
-            this.appendContextMenuItem(popup, target.innerHTML, target.getAttribute("lineNumber"));
+            this.appendContextMenuItem(popup, target.innerHTML,
+                target.getAttribute("lineNumber"));
         }
     },
 
@@ -237,11 +236,17 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
         var item = doc.createElement("menu");
         item.setAttribute("type", "splitmenu");
         item.setAttribute("iconic", "true");
-        item.setAttribute("oncommand", "Firebug.ExternalEditors.onContextMenuCommand(event)");
+
+        item.addEventListener("command", function(event)
+        {
+            Firebug.ExternalEditors.onContextMenuCommand(event);
+        });
 
         var menupopup = doc.createElement("menupopup");
-        menupopup.setAttribute("onpopupshowing",
-            "return Firebug.ExternalEditors.onEditorsShowing(this)");
+        menupopup.addEventListener("popupshowing", function(event)
+        {
+            return Firebug.ExternalEditors.onEditorsShowing(this);
+        });
 
         item.appendChild(menupopup);
         return item;
@@ -251,7 +256,7 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
     {
         var editor = this.getDefaultEditor();
         var doc = popup.ownerDocument;
-        var item = doc.getElementById("menu_firebugOpenWithEditor");
+        var item = doc.getElementById("menu_firebug_firebugOpenWithEditor");
 
         if (item)
         {
@@ -293,6 +298,7 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
             if (box && box.centralLine)
                 line = box.centralLine;
         }
+
         // if firebug isn't active this will redturn documentURI
         var url = Firebug.chrome.getSelectedPanelURL();
         this.open(url, line, editorId, context);
@@ -308,6 +314,7 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
             if (FBTrace.DBG_EXTERNALEDITORS)
                 FBTrace.sysout("externalEditors.open; href: " + href + ", line: " + line +
                     ", editorId: " + editorId + ", context: " + context, context);
+
             if (!href)
                 return;
 
@@ -324,7 +331,8 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
                 line: line,
                 editor: editor,
                 cmdline: editor.cmdline
-            }
+            };
+
             var self = this;
             this.getLocalFile(options, function(file)
             {
@@ -338,6 +346,7 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
 
                     options.file = file.path;
                 }
+
                 var args = self.parseCmdLine(options.cmdline, options);
 
                 if (FBTrace.DBG_EXTERNALEDITORS)
@@ -346,7 +355,7 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
                 System.launchProgram(editor.executable, args);
             });
         }
-        catch(exc)
+        catch (exc)
         {
             Debug.ERROR(exc);
         }
@@ -368,19 +377,22 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
             req.open("HEAD", href, true);
             req.setRequestHeader("X-Line", options.line);
             req.setRequestHeader("X-Column", options.col);
-            req.onloadend = function() {
+            req.onloadend = function()
+            {
                 var path = req.getResponseHeader("X-Local-File-Path");
                 if (FBTrace.DBG_EXTERNALEDITORS)
                     FBTrace.sysout("externalEditors. server says", path);
+
                 var file = fixupFilePath(path);
                 if (file)
                     callback(file);
+
                 // TODO: do we need to notifiy user if path was wrong?
-            }
+            };
+
             req.send(null);
             return;
         }
-
 
         file = this.transformHref(href);
         if (file)
@@ -391,6 +403,8 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
 
     parseCmdLine: function(cmdLine, options)
     {
+        cmdLine = cmdLine || "";
+
         var lastI = 0, args = [], argIndex = 0, inGroup;
         var subs = "col|line|file|url".split("|");
 
@@ -424,7 +438,7 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
         cmdLine.replace(/(\s+|$)|(?:%([{}]|(%|col|line|file|url)))/g, function(a, b, c, d, i, str)
         {
             var skipped = str.substring(lastI, i);
-            lastI = i+a.length;
+            lastI = i + a.length;
             skipped && args.push(skipped);
 
             if (b || !a)
@@ -432,17 +446,24 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
                 args.push(" ");
                 if (!inGroup)
                     checkGroup();
-            } else  if (c == "{") {
+            }
+            else if (c == "{")
+            {
                 inGroup = true;
-            } else  if (c == "}") {
+            }
+            else if (c == "}")
+            {
                 inGroup = false;
                 checkGroup();
-            } else  if (d) {
+            }
+            else if (d)
+            {
                 args.push(a);
             }
         });
 
         cmdLine = args.join("");
+
         // add %file
         if (!/%(url|file)/.test(cmdLine))
             cmdLine += " %file";
@@ -450,16 +471,19 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
         args = cmdLine.trim().split(" ");
         args = args.map(function(x)
         {
-            return x.replace(/(?:%(%|col|line|file|url))/g, function(a, b){
-                if (b == '%')
+            return x.replace(/(?:%(%|col|line|file|url))/g, function(a, b)
+            {
+                if (b == "%")
                     return b;
                 if (options[b] == null)
                     return "";
                 return options[b];
             });
-        })
+        });
+
         return args;
     },
+
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
     transformHref: function(href)
@@ -504,10 +528,11 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
 
         var lpath = href.replace(/^[^:]+:\/*/g, "").replace(/\?.*$/g, "")
             .replace(/[^0-9a-zA-Z\/.]/g, "_");
+
         /* dummy comment to workaround eclipse bug */
         if (!/\.[\w]{1,5}$/.test(lpath))
         {
-            if ( lpath.charAt(lpath.length-1) == '/' )
+            if (lpath.charAt(lpath.length-1) == "/")
                 lpath += "index";
             lpath += ".html";
         }
@@ -515,7 +540,7 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
         if (System.getPlatformName() == "WINNT")
             lpath = lpath.replace(/\//g, "\\");
 
-        var file = Xpcom.QI(temporaryDirectory.clone(), nsILocalFile);
+        var file = Xpcom.QI(temporaryDirectory.clone(), nsIFile);
         file.appendRelativePath(lpath);
         if (!file.exists())
             file.create(nsIFile.NORMAL_FILE_TYPE, 0664);
@@ -541,7 +566,7 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
     {
         try
         {
-            var file = Xpcom.CCIN("@mozilla.org/file/local;1", "nsILocalFile");
+            var file = Xpcom.CCIN("@mozilla.org/file/local;1", "nsIFile");
             for (var i = 0; i < temporaryFiles.length; ++i)
             {
                 file.initWithPath(temporaryFiles[i]);
@@ -564,12 +589,15 @@ Firebug.ExternalEditors = Obj.extend(Firebug.Module,
     },
 });
 
+// ********************************************************************************************* //
+// Helpers
+
 function fixupFilePath(path)
 {
     var file = Url.getLocalOrSystemFile(path);
     if (!file)
     {
-        path = 'file:///' + path.replace(/[\/\\]+/g, '/');
+        path = "file:///" + path.replace(/[\/\\]+/g, "/");
         file = Url.getLocalOrSystemFile(path);
     }
     return file;
@@ -594,7 +622,7 @@ function lazyLoadUrlMappings(propName)
     {
         try
         {
-            return RegExp(source, 'i');
+            return RegExp(source, "i");
         }
         catch(e)
         {
@@ -603,17 +631,18 @@ function lazyLoadUrlMappings(propName)
 
     this.pathTransformations = [];
     this.checkHeaderRe = null;
+
     for (var i in lines)
     {
-        var line = lines[i].split('=>');
+        var line = lines[i].split("=>");
 
         if (!line[1] || !line[0])
             continue;
 
-        var start = line[0].trim()
+        var start = line[0].trim();
         var end = line[1].trim();
 
-        if (start[0] == '/' && start[1] == '/')
+        if (start[0] == "/" && start[1] == "/")
             continue;
 
         if (start == "X-Local-File-Path")
@@ -624,9 +653,9 @@ function lazyLoadUrlMappings(propName)
         var t = {
             regexp: safeRegexp(start, i),
             filePath: end
-        }
+        };
         if (t.regexp && t.filePath)
-            this.pathTransformations.push(t)
+            this.pathTransformations.push(t);
     }
 
     if (!this.checkHeaderRe)
@@ -650,7 +679,7 @@ Firebug.ExternalEditors.saveUrlMappings = function()
 
     var file = userFile("urlMappings.txt");
     writeToFile(file, text.join(""));
-}
+};
 
 // file helpers
 function userFile(name)
@@ -658,12 +687,12 @@ function userFile(name)
     var file = Services.dirsvc.get("ProfD", Ci.nsIFile);
     file.append("firebug");
     file.append(name);
-    return file
+    return file;
 }
 
 function readEntireFile(file)
 {
-    if(!file.exists())
+    if (!file.exists())
         return "";
 
     var data = "", str = {};
@@ -675,9 +704,10 @@ function readEntireFile(file)
     const replacementChar = Ci.nsIConverterInputStream.DEFAULT_REPLACEMENT_CHARACTER;
     fstream.init(file, -1, 0, 0);
     converter.init(fstream, "UTF-8", 1024, replacementChar);
-    while (converter.readString(4096, str) != 0){
+
+    while (converter.readString(4096, str) != 0)
         data += str.value;
-    }
+
     converter.close();
 
     return data;
@@ -690,7 +720,7 @@ function writeToFile(file, text)
     var converter = Cc["@mozilla.org/intl/converter-output-stream;1"]
         .createInstance(Ci.nsIConverterOutputStream);
 
-    if(!file.exists())
+    if (!file.exists())
         file.create(Ci.nsIFile.NORMAL_FILE_TYPE, 0664);
 
     fostream.init(file, 0x02 | 0x08 | 0x20, 0664, 0); // write, create, truncate

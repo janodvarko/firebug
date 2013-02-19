@@ -6,8 +6,9 @@ define([
     "firebug/lib/css",
     "firebug/lib/array",
     "firebug/lib/xml",
+    "firebug/lib/wrapper",
 ],
-function(FBTrace, Deprecated, Css, Arr, Xml) {
+function(FBTrace, Deprecated, Css, Arr, Xml, Wrapper) {
 
 // ********************************************************************************************* //
 // Constants
@@ -18,6 +19,7 @@ var Cc = Components.classes;
 var Dom = {};
 var domMemberCache = null;
 var domMemberMap = {};
+var domMappedData = new WeakMap();
 
 Dom.domUtils = Cc["@mozilla.org/inspector/dom-utils;1"].getService(Ci.inIDOMUtils);
 
@@ -89,8 +91,13 @@ Dom.getElementsByAttribute = function(node, attrName, attrValue)
 {
     function iteratorHelper(node, attrName, attrValue, result)
     {
+        // xxxFlorent: sadly, Documents and DocumentFragments do not have firstElementChild
+        // properties currently.
         for (var child = node.firstChild; child; child = child.nextSibling)
         {
+            if (child.nodeType !== document.ELEMENT_NODE)
+                continue;
+
             if (child.getAttribute(attrName) == attrValue)
                 result.push(child);
 
@@ -101,7 +108,7 @@ Dom.getElementsByAttribute = function(node, attrName, attrValue)
     var result = [];
     iteratorHelper(node, attrName, attrValue, result);
     return result;
-}
+};
 
 Dom.isAncestor = function(node, potentialAncestor)
 {
@@ -116,7 +123,7 @@ Dom.isAncestor = function(node, potentialAncestor)
 
 Dom.getNextElement = function(node)
 {
-    while (node && node.nodeType != 1)
+    while (node && node.nodeType != Node.ELEMENT_NODE)
         node = node.nextSibling;
 
     return node;
@@ -124,7 +131,7 @@ Dom.getNextElement = function(node)
 
 Dom.getPreviousElement = function(node)
 {
-    while (node && node.nodeType != 1)
+    while (node && node.nodeType != Node.ELEMENT_NODE)
         node = node.previousSibling;
 
     return node;
@@ -145,6 +152,12 @@ Dom.getBody = function(doc)
 // ********************************************************************************************* //
 // DOM Modification
 
+Dom.insertAfter = function(newNode, referenceNode)
+{
+    if (referenceNode.parentNode)
+        referenceNode.parentNode.insertBefore(newNode, referenceNode.nextSibling);
+};
+
 Dom.addScript = function(doc, id, src)
 {
     var element = doc.createElementNS("http://www.w3.org/1999/xhtml", "html:script");
@@ -154,7 +167,7 @@ Dom.addScript = function(doc, id, src)
     if (!FBTrace.DBG_CONSOLE)
         Firebug.setIgnored(element);
 
-    element.innerHTML = src;
+    element.textContent = src;
 
     if (doc.documentElement)
     {
@@ -169,17 +182,14 @@ Dom.addScript = function(doc, id, src)
         return;
     }
     return element;
-}
+};
 
 Dom.setOuterHTML = function(element, html)
 {
-    var doc = element.ownerDocument;
-    var range = doc.createRange();
-    range.selectNode(element || doc.documentElement);
-
     try
     {
-        var fragment = range.createContextualFragment(html);
+        var fragment = Dom.markupToDocFragment(html, element);
+
         var first = fragment.firstChild;
         var last = fragment.lastChild;
         element.parentNode.replaceChild(fragment, element);
@@ -187,8 +197,17 @@ Dom.setOuterHTML = function(element, html)
     }
     catch (e)
     {
-        return [element, element]
+        return [element, element];
     }
+};
+
+Dom.markupToDocFragment = function(markup, parent)
+{
+    var doc = parent.ownerDocument;
+    var range = doc.createRange();
+    range.selectNode(parent || doc.documentElement);
+
+    return range.createContextualFragment(markup);
 };
 
 Dom.appendInnerHTML = function(element, html, referenceElement)
@@ -244,7 +263,7 @@ Dom.hide = function(elt, hidden)
 
 Dom.clearNode = function(node)
 {
-    node.innerHTML = "";
+    node.textContent = "";
 };
 
 Dom.eraseNode = function(node)
@@ -275,6 +294,16 @@ Dom.isElement = function(o)
     }
 };
 
+Dom.isRange = function(o)
+{
+    try {
+        return o && o instanceof window.Range;
+    }
+    catch (ex) {
+        return false;
+    }
+};
+
 Dom.hasChildElements = function(node)
 {
     if (node.contentDocument) // iframes
@@ -282,7 +311,7 @@ Dom.hasChildElements = function(node)
 
     for (var child = node.firstChild; child; child = child.nextSibling)
     {
-        if (child.nodeType == 1)
+        if (child.nodeType == Node.ELEMENT_NODE)
             return true;
     }
 
@@ -293,13 +322,13 @@ Dom.hasChildElements = function(node)
 
 Dom.getNextByClass = function(root, state)
 {
-    function iter(node) { return node.nodeType == 1 && Css.hasClass(node, state); }
+    function iter(node) { return node.nodeType == Node.ELEMENT_NODE && Css.hasClass(node, state); }
     return Dom.findNext(root, iter);
 };
 
 Dom.getPreviousByClass = function(root, state)
 {
-    function iter(node) { return node.nodeType == 1 && Css.hasClass(node, state); }
+    function iter(node) { return node.nodeType == Node.ELEMENT_NODE && Css.hasClass(node, state); }
     return Dom.findPrevious(root, iter);
 };
 
@@ -358,7 +387,10 @@ Dom.findNext = function(node, criteria, upOnly, maxRoot)
     }
 
     if (node.parentNode && node.parentNode != maxRoot)
+    {
         return Dom.findNext(node.parentNode, criteria, true, maxRoot);
+    }
+    return null;
 };
 
 Dom.findPrevious = function(node, criteria, downOnly, maxRoot)
@@ -388,11 +420,12 @@ Dom.findPrevious = function(node, criteria, downOnly, maxRoot)
         if (criteria(node.parentNode))
             return node.parentNode;
 
-        return Dom.findPrevious(node.parentNode, criteria, true);
+        return Dom.findPrevious(node.parentNode, criteria, true, maxRoot);
     }
+    return null;
 };
 
-// ************************************************************************************************
+// ********************************************************************************************* //
 // Graphics
 
 Dom.getClientOffset = function(elt)
@@ -410,11 +443,14 @@ Dom.getClientOffset = function(elt)
 
         if (p)
         {
-            if (p.nodeType == 1)
+            if (p.nodeType == Node.ELEMENT_NODE)
                 addOffset(p, coords, view);
         }
         else if (elt.ownerDocument.defaultView.frameElement)
-            addOffset(elt.ownerDocument.defaultView.frameElement, coords, elt.ownerDocument.defaultView);
+        {
+            addOffset(elt.ownerDocument.defaultView.frameElement, coords,
+                elt.ownerDocument.defaultView);
+        }
     }
 
     var coords = {x: 0, y: 0};
@@ -435,8 +471,8 @@ Dom.getClientOffset = function(elt)
  */
 Dom.getLTRBWH = function(elt)
 {
-    var bcrect,
-        dims = {"left": 0, "top": 0, "right": 0, "bottom": 0, "width": 0, "height": 0};
+    var bcrect;
+    var dims = {"left": 0, "top": 0, "right": 0, "bottom": 0, "width": 0, "height": 0};
 
     if (elt)
     {
@@ -477,7 +513,8 @@ Dom.getOffsetSize = function(elt)
  */
 Dom.getOverflowParent = function(element)
 {
-    for (var scrollParent = element.parentNode; scrollParent; scrollParent = scrollParent.offsetParent)
+    for (var scrollParent = element.parentNode; scrollParent;
+        scrollParent = scrollParent.offsetParent)
     {
         if (scrollParent.scrollHeight > scrollParent.offsetHeight)
             return scrollParent;
@@ -494,9 +531,11 @@ Dom.isScrolledToBottom = function(element)
     var onBottom = (element.scrollTop + element.offsetHeight) == element.scrollHeight;
 
     if (FBTrace.DBG_CONSOLE)
+    {
         FBTrace.sysout("Dom.isScrolledToBottom offsetHeight: " + element.offsetHeight +
             ", scrollTop: " + element.scrollTop + ", scrollHeight: " + element.scrollHeight +
             ", onBottom: " + onBottom);
+    }
 
     return onBottom;
 };
@@ -512,9 +551,14 @@ Dom.scrollToBottom = function(element)
 
     if (FBTrace.DBG_CONSOLE)
     {
-        FBTrace.sysout("scrollToBottom reset scrollTop "+element.scrollTop+" = "+element.scrollHeight);
+        FBTrace.sysout("scrollToBottom reset scrollTop " + element.scrollTop + " = " +
+            element.scrollHeight);
+
         if (element.scrollHeight == element.offsetHeight)
-            FBTrace.sysout("scrollToBottom attempt to scroll non-scrollable element "+element, element);
+        {
+            FBTrace.sysout("scrollToBottom attempt to scroll non-scrollable element " +
+                element, element);
+        }
     }
 
     return (element.scrollTop == element.scrollHeight);
@@ -555,8 +599,8 @@ Dom.linesIntoCenterView = function(element, scrollBox)  // {before: int, after: 
     var offset = Dom.getClientOffset(element);
 
     var topSpace = offset.y - scrollBox.scrollTop;
-    var bottomSpace = (scrollBox.scrollTop + scrollBox.clientHeight)
-        - (offset.y + element.offsetHeight);
+    var bottomSpace = (scrollBox.scrollTop + scrollBox.clientHeight) -
+        (offset.y + element.offsetHeight);
 
     if (topSpace < 0 || bottomSpace < 0)
     {
@@ -564,13 +608,13 @@ Dom.linesIntoCenterView = function(element, scrollBox)  // {before: int, after: 
         var centerY = offset.y - split;
         scrollBox.scrollTop = centerY;
         topSpace = split;
-        bottomSpace = split -  element.offsetHeight;
+        bottomSpace = split - element.offsetHeight;
     }
 
     return {
         before: Math.round((topSpace/element.offsetHeight) + 0.5),
         after: Math.round((bottomSpace/element.offsetHeight) + 0.5)
-    }
+    };
 };
 
 /**
@@ -645,7 +689,7 @@ Dom.scrollTo = function(element, scrollBox, alignmentX, alignmentY, scrollWhenVi
         // Element is horizontally not completely visible or scrolling is enforced
         if (leftSpace < 0 || rightSpace < 0 || scrollWhenVisible)
         {
-            switch (alignmentY)
+            switch (alignmentX)
             {
                 case "left":
                     scrollBox.scrollLeft = offset.x;
@@ -657,7 +701,7 @@ Dom.scrollTo = function(element, scrollBox, alignmentX, alignmentY, scrollWhenVi
                     var x = elementFitsIntoScrollBox || alignmentX != "centerOrLeft" ?
                         offset.x - (scrollBox.clientWidth - element.offsetWidth) / 2 :
                         offset.x;
-                    scrollBox.scrollLeft = y;
+                    scrollBox.scrollLeft = x;
                     break;
 
                 case "right":
@@ -682,7 +726,83 @@ Dom.scrollTo = function(element, scrollBox, alignmentX, alignmentY, scrollWhenVi
  */
 Dom.scrollIntoCenterView = function(element, scrollBox, notX, notY)
 {
-    Dom.scrollTo(element, scrollBox, notX ? "none" : "centerOrLeft", notY ? "none" : "centerOrTop");
+    Dom.scrollTo(element, scrollBox, notX ? "none" : "centerOrLeft",
+        notY ? "none" : "centerOrTop");
+};
+
+Dom.scrollMenupopup = function(popup, item)
+{
+    var doc = popup.ownerDocument;
+    var box = doc.getAnonymousNodes(popup)[0];
+    var scrollBox = doc.getAnonymousNodes(box)[1];
+
+    if (item == undefined)
+    {
+        scrollBox.scrollTop = scrollBox.scrollHeight + 100;
+    }
+    else if (item == 0)
+    {
+        scrollBox.scrollTop = 0;
+    }
+    else
+    {
+        var popupRect = popup.getBoundingClientRect();
+        var itemRect = item.getBoundingClientRect();
+
+        if (itemRect.top < popupRect.top + itemRect.height)
+        {
+            scrollBox.scrollTop += itemRect.top - popupRect.top - itemRect.height;
+        }
+        else if (itemRect.bottom + itemRect.height > popupRect.bottom)
+        {
+            scrollBox.scrollTop -= popupRect.bottom - itemRect.bottom - itemRect.height;
+        }
+    }
+};
+
+// ********************************************************************************************* //
+// MappedData
+
+function getElementData(element)
+{
+    var elementData;
+
+    // force element to be wrapped:
+    element = new XPCNativeWrapper(element);
+
+    if (!domMappedData.has(element))
+    {
+        elementData = {};
+        domMappedData.set(element, elementData);
+    }
+    else
+        elementData = domMappedData.get(element);
+
+    return elementData;
+}
+
+Dom.getMappedData = function(element, key)
+{
+    var elementData = getElementData(element);
+    return elementData[key];
+};
+
+Dom.setMappedData = function(element, key, value)
+{
+    if (!Dom.isNode(element))
+        throw new TypeError("expected an element as the first argument");
+
+    if (typeof key !== "string")
+        throw new TypeError("the key argument must be a string");
+
+    var elementData = getElementData(element);
+    elementData[key] = value;
+};
+
+Dom.deleteMappedData = function(element, key)
+{
+    var elementData = getElementData(element);
+    delete elementData[key];
 };
 
 // ********************************************************************************************* //
@@ -754,33 +874,38 @@ Dom.getDOMMembers = function(object)
 
 Dom.isDOMMember = function(object, propName)
 {
+    // We use "in" here instead of "hasOwnProperty" so that things on Object.prototype
+    // also get treated as DOM members.
+    // XXXsimon: Non-DOM objects should also get this behavior.
     var members = Dom.getDOMMembers(object);
     return members && propName in members;
 };
 
 Dom.isDOMConstant = function(object, name)
 {
-    if (name == undefined)
-        return Dom.isDOMConstantDep({},object);
-
-    // The constant map has also its own prototype, but it isn't considered to be a constant.
-    if (name == "__proto__")
+    if (!Dom.domConstantMap.hasOwnProperty(name))
         return false;
 
-    if (!(object instanceof Window ||
-        object instanceof Node ||
-        object instanceof Location ||
-        object instanceof Event ||
-        object instanceof Dom.EventCopy))
+    try
+    {
+        // Test for nativeness. This is a fragile piece of dark magic, and might be
+        // equivalent to |Cu.isXrayWrapper(XPCNativeWrapper(object))| in >= Fx 20.
+        object = XPCNativeWrapper.unwrap(object);
+        var isNative = (XPCNativeWrapper(object).toString !== XPCNativeWrapper(object.toString));
+        return (isNative ||
+            object instanceof window.Event ||
+            object instanceof Dom.EventCopy);
+    }
+    catch (exc)
+    {
         return false;
-
-    return Dom.domConstantMap.hasOwnProperty(name);
-}
+    }
+};
 
 Dom.isInlineEventHandler = function(name)
 {
-    return Dom.domInlineEventHandlersMap[name];
-}
+    return !!Dom.domInlineEventHandlersMap[name];
+};
 
 Dom.EventCopy = function(event)
 {
@@ -792,13 +917,14 @@ Dom.EventCopy = function(event)
             this[name] = event[name];
         } catch (exc) { }
     }
-}
-
-var isDOMConstantDep = Deprecated.deprecated(
-    "isDOMConstant(name) signature changed (object,name)",
-    Dom.isDOMConstant);
+};
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+// Note: Missing HTML elements:
+// <tbody>, <object>, <embed>, <video>, <audio>, <source>, <option>, <select>, <textarea>, <br>,
+// <frame>, <iframe>, <frameset>, <link>, <meta>, <style>, probably more
+// Instead of adding them, effort should rather be spent on automatic scanning.
 
 domMemberMap.Window =
 [
@@ -824,7 +950,12 @@ domMemberMap.Window =
     "mozAnimationStartTime", //FF4.0
     "mozPaintCount", //FF4.0
     "mozRequestAnimationFrame", //FF4.0
-    "mozIndexedDB", //FF4.0
+    "mozCancelAnimationFrame",
+    "mozCancelRequestAnimationFrame",
+
+    "mozCancelAnimationFrame",
+    "mozCancelRequestAnimationFrame",
+    "indexedDB",
 
     "status",
     "defaultStatus",
@@ -850,7 +981,6 @@ domMemberMap.Window =
     "scrollbars",
     "fullScreen",
     "netscape",
-    "java",
     "console",
     "Components",
     "controllers",
@@ -863,7 +993,6 @@ domMemberMap.Window =
     "length",
 
     "sessionStorage",
-    "globalStorage",
 
     "setTimeout",
     "setInterval",
@@ -909,20 +1038,629 @@ domMemberMap.Window =
     "btoa",
     "updateCommands",
     "XPCNativeWrapper",
-    "GeckoActiveXObject",
     "applicationCache",      // FF3
-    "GetWeakReference", // Gecko
-    "XPCSafeJSObjectWrapper", // Gecko
     "postMessage",
     "localStorage",  // FF3.5
     "showModalDialog", // FF 3.0, MS IE4
 
     "InstallTrigger",
 
-    "performance", // https://developer.mozilla.org/en/Navigation_timing
-    "matchMedia", // https://developer.mozilla.org/en/DOM/window.matchMedia
+    "performance",
+    "matchMedia",
 
     "getInterface",
+
+    "BarProp",
+    "Controllers",
+    "Crypto",
+    "DOMException",
+    "DOMStringList",
+    "EventTarget",
+    "History",
+    "MimeTypeArray",
+    "Navigator",
+    "NodeList",
+    "OfflineResourceList",
+    "Screen",
+    "Storage",
+    "XULControllers",
+    "Document",
+    "Element",
+    "Attr",
+    "CharacterData",
+    "DOMTokenList",
+    "Text",
+    "Proxy",
+    "Blob",
+    "File",
+    "Image",
+    "Option",
+
+    "HTMLDocument",
+    "HTMLByteRanges",
+    "HTMLCollection",
+    "HTMLOptionsCollection",
+    "HTMLPropertiesCollection",
+
+    "HTMLElement",
+    "HTMLUnknownElement",
+    "HTMLAnchorElement",
+    "HTMLAppletElement",
+    "HTMLAreaElement",
+    "HTMLAudioElement",
+    "HTMLBaseElement",
+    "HTMLBodyElement",
+    "HTMLBRElement",
+    "HTMLButtonElement",
+    "HTMLCanvasElement",
+    "HTMLCommandElement",
+    "HTMLDataListElement",
+    "HTMLDirectoryElement",
+    "HTMLDivElement",
+    "HTMLDListElement",
+    "HTMLEmbedElement",
+    "HTMLFieldSetElement",
+    "HTMLFontElement",
+    "HTMLFormElement",
+    "HTMLFrameElement",
+    "HTMLFrameSetElement",
+    "HTMLHeadElement",
+    "HTMLHeadingElement",
+    "HTMLHRElement",
+    "HTMLHtmlElement",
+    "HTMLHtmlElement",
+    "HTMLIFrameElement",
+    "HTMLImageElement",
+    "HTMLInputElement",
+    "HTMLLabelElement",
+    "HTMLLegendElement",
+    "HTMLLIElement",
+    "HTMLLinkElement",
+    "HTMLMapElement",
+    "HTMLMediaElement",
+    "HTMLMenuElement",
+    "HTMLMenuItemElement",
+    "HTMLMetaElement",
+    "HTMLMeterElement",
+    "HTMLModElement",
+    "HTMLObjectElement",
+    "HTMLOListElement",
+    "HTMLOptGroupElement",
+    "HTMLOptionElement",
+    "HTMLOutputElement",
+    "HTMLParagraphElement",
+    "HTMLParamElement",
+    "HTMLPreElement",
+    "HTMLProgressElement",
+    "HTMLQuoteElement",
+    "HTMLScriptElement",
+    "HTMLSelectElement",
+    "HTMLSourceElement",
+    "HTMLSpanElement",
+    "HTMLStyleElement",
+    "HTMLTableCaptionElement",
+    "HTMLTableCellElement",
+    "HTMLTableColElement",
+    "HTMLTableElement",
+    "HTMLTableRowElement",
+    "HTMLTableSectionElement",
+    "HTMLTextAreaElement",
+    "HTMLTitleElement",
+    "HTMLUListElement",
+    "HTMLVideoElement",
+
+    "JSON",
+    "Location",
+    "Math",
+    "Node",
+    "StopIteration",
+    "Window",
+    "XULElement",
+    "CSS2Properties",
+    "CSSStyleDeclaration",
+    "Error",
+    "EvalError",
+    "InternalError",
+    "Namespace",
+    "QName",
+    "RangeError",
+    "ReferenceError",
+    "SyntaxError",
+    "TypeError",
+    "URIError",
+    "Array",
+    "ArrayBuffer",
+    "Boolean",
+    "DataView",
+    "Date",
+    "Float32Array",
+    "Float64Array",
+    "Function",
+    "Int16Array",
+    "Int32Array",
+    "Int8Array",
+    "Iterator",
+    "Map",
+    "Number",
+    "Object",
+    "ParallelArray",
+    "QueryInterface",
+    "RegExp",
+    "Set",
+    "String",
+    "Uint16Array",
+    "Uint32Array",
+    "Uint8Array",
+    "Uint8ClampedArray",
+    "WeakMap",
+    "XML",
+    "XMLList",
+    "decodeURI",
+    "decodeURIComponent",
+    "dumpProfile",
+    "encodeURI",
+    "encodeURIComponent",
+    "escape",
+    "isFinite",
+    "isNaN",
+    "isXMLName",
+    "parseFloat",
+    "parseInt",
+    "pauseProfilers",
+    "resumeProfilers",
+    "startProfiling",
+    "stopProfiling",
+    "unescape",
+    "uneval",
+    "Performance",
+    "PerformanceNavigation",
+    "PerformanceTiming",
+
+    "AnimationEvent",
+    "BeforeUnloadEvent",
+    "CommandEvent",
+    "CompositionEvent",
+    "DataContainerEvent",
+    "DataErrorEvent",
+    "DeviceMotionEvent",
+    "DragEvent",
+    "IDBVersionChangeEvent",
+    "KeyEvent",
+    "KeyboardEvent",
+    "LSProgressEvent",
+    "MessageEvent",
+    "MouseScrollEvent",
+    "MozSmsEvent",
+    "MutationEvent",
+    "NSEvent",
+    "NotifyAudioAvailableEvent",
+    "NotifyPaintEvent",
+    "SVGEvent",
+    "SVGZoomEvent",
+    "ScrollAreaEvent",
+    "SimpleGestureEvent",
+    "SmartCardEvent",
+    "TimeEvent",
+    "TransitionEvent",
+    "USSDReceivedEvent",
+    "XMLHttpProgressEvent",
+    "XULCommandEvent",
+
+    "Event",
+    "CloseEvent",
+    "CustomEvent",
+    "DOMTransactionEvent",
+    "DeviceLightEvent",
+    "DeviceOrientationEvent",
+    "DeviceProximityEvent",
+    "DeviceStorageChangeEvent",
+    "HashChangeEvent",
+    "MouseEvent",
+    "MozApplicationEvent",
+    "MozContactChangeEvent",
+    "MozSettingsEvent",
+    "PageTransitionEvent",
+    "PopStateEvent",
+    "PopupBlockedEvent",
+    "ProgressEvent",
+    "StorageEvent",
+    "UIEvent",
+    "UserProximityEvent",
+    "WheelEvent",
+
+    "AsyncScrollEventDetail",
+    "BatteryManager",
+    "BoxObject",
+    "CRMFObject",
+    "CSSCharsetRule",
+    "CSSConditionRule",
+    "CSSFontFaceRule",
+    "CSSGroupRuleRuleList",
+    "CSSGroupingRule",
+    "CSSImportRule",
+    "CSSMediaRule",
+    "CSSMozDocumentRule",
+    "CSSNameSpaceRule",
+    "CSSPageRule",
+    "CSSRect",
+    "CSSRule",
+    "CSSRuleList",
+    "CSSStyleRule",
+    "CSSStyleSheet",
+    "CSSSupportsRule",
+    "CSSUnknownRule",
+    "CameraCapabilities",
+    "CameraControl",
+    "CameraManager",
+    "CanvasGradient",
+    "CanvasPattern",
+    "ChromeWindow",
+    "ClientInformation",
+    "ClientRect",
+    "Contact",
+    "ContactAddress",
+    "ContactField",
+    "ContactFindOptions",
+    "ContactManager",
+    "ContactProperties",
+    "ContactTelField",
+    "Counter",
+    "CryptoDialogs",
+    "DOMError",
+    "DOMRequest",
+    "DataChannel",
+    "DataTransfer",
+    "DesktopNotification",
+    "DesktopNotificationCenter",
+    "DeviceAcceleration",
+    "DeviceRotationRate",
+    "DeviceStorage",
+    "DeviceStorageCursor",
+    "DeviceStorageStat",
+    "DocumentTouch",
+    "DocumentXBL",
+    "ElementCSSInlineStyle",
+    "ElementTimeControl",
+    "EventListener",
+    "EventListenerInfo",
+    "FileRequest",
+    "FontFace",
+    "FontFaceList",
+    "GeoGeolocation",
+    "GeoPosition",
+    "GeoPositionCallback",
+    "GeoPositionCoords",
+    "GeoPositionError",
+    "GeoPositionErrorCallback",
+    "GetSVGDocument",
+    "GetUserMediaErrorCallback",
+    "GetUserMediaSuccessCallback",
+    "GlobalObjectConstructor",
+    "GlobalPropertyInitializer",
+    "IDBCursor",
+    "IDBCursorWithValue",
+    "IDBDatabase",
+    "IDBFactory",
+    "IDBIndex",
+    "IDBKeyRange",
+    "IDBObjectStore",
+    "IDBOpenDBRequest",
+    "IDBRequest",
+    "IDBTransaction",
+    "ImageDocument",
+    "JSWindow",
+    "LinkStyle",
+    "LoadStatus",
+    "LocalMediaStream",
+    "LockedFile",
+    "MediaError",
+    "MediaList",
+    "MediaQueryList",
+    "MediaQueryListListener",
+    "MediaStream",
+    "MimeType",
+    "ModalContentWindow",
+    "MozAlarmsManager",
+    "MozBrowserFrame",
+    "MozCSSKeyframeRule",
+    "MozCSSKeyframesRule",
+    "MozCanvasPrintState",
+    "MozConnection",
+    "MozNavigatorNetwork",
+    "MozNavigatorSms",
+    "MozPowerManager",
+    "MozSmsCursor",
+    "MozSmsManager",
+    "MozSmsMessage",
+    "MozSmsRequest",
+    "MozSmsSegmentInfo",
+    "MozWakeLock",
+    "MozWakeLockListener",
+    "NSEditableElement",
+    "NSXPathExpression",
+    "NamedNodeMap",
+    "NavigatorCamera",
+    "NavigatorDesktopNotification",
+    "NavigatorDeviceStorage",
+    "NavigatorGeolocation",
+    "NavigatorUserMedia",
+    "NodeFilter",
+    "NodeIterator",
+    "NodeSelector",
+    "OpenWindowEventDetail",
+    "Parser",
+    "PermissionSettings",
+    "Pkcs11",
+    "Plugin",
+    "PluginArray",
+    "RTCIceCandidate",
+    "RTCPeerConnection",
+    "RTCSessionDescription",
+    "Range",
+    "RequestService",
+    "Selection",
+    "Serializer",
+    "SettingsLock",
+    "SettingsManager",
+    "StorageIndexedDB",
+    "StorageItem",
+    "StorageManager",
+    "StorageObsolete",
+    "StyleSheet",
+    "StyleSheetList",
+    "TCPSocket",
+    "TextMetrics",
+    "TimeRanges",
+    "ToString",
+    "TreeColumn",
+    "TreeColumns",
+    "TreeContentView",
+    "TreeSelection",
+    "TreeWalker",
+    "UserDataHandler",
+    "ValidityState",
+    "WindowCollection",
+    "WindowInternal",
+    "WindowPerformance",
+    "WindowUtils",
+    "XMLDocument",
+    "XMLStylesheetProcessingInstruction",
+    "XPathExpression",
+    "XPathNSResolver",
+    "XPathNamespace",
+    "XPathResult",
+
+    "Audio",
+    "AudioBuffer",
+    "AudioBufferSourceNode",
+    "AudioDestinationNode",
+    "AudioListener",
+    "AudioNode",
+    "AudioParam",
+    "AudioSourceNode",
+    "BiquadFilterNode",
+    "CDATASection",
+    "CSSPrimitiveValue",
+    "CSSValue",
+    "CSSValueList",
+    "CanvasRenderingContext2D",
+    "CaretPosition",
+    "ClientRectList",
+    "Comment",
+    "DOMImplementation",
+    "DOMParser",
+    "DOMSettableTokenList",
+    "DelayNode",
+    "DocumentFragment",
+    "DocumentType",
+    "DynamicsCompressorNode",
+    "EventSource",
+    "FileHandle",
+    "FileList",
+    "FileReader",
+    "FormData",
+    "GainNode",
+    "ImageData",
+    "MozSmsFilter",
+    "MutationObserver",
+    "MutationRecord",
+    "PaintRequest",
+    "PaintRequestList",
+    "PannerNode",
+    "ProcessingInstruction",
+    "PropertyNodeList",
+    "RGBColor",
+    "Rect",
+    "TextDecoder",
+    "TextEncoder",
+    "WebGLActiveInfo",
+    "WebGLRenderingContext",
+    "WebGLShaderPrecisionFormat",
+    "WebSocket",
+    "XMLHttpRequest",
+    "XMLHttpRequestUpload",
+    "XMLSerializer",
+    "XPathEvaluator",
+    "XSLTProcessor",
+
+    "SVGAElement",
+    "SVGAltGlyphElement",
+    "SVGAngle",
+    "SVGAnimatedAngle",
+    "SVGAnimatedBoolean",
+    "SVGAnimatedEnumeration",
+    "SVGAnimatedInteger",
+    "SVGAnimatedLength",
+    "SVGAnimatedLengthList",
+    "SVGAnimatedNumber",
+    "SVGAnimatedNumberList",
+    "SVGAnimatedPathData",
+    "SVGAnimatedPoints",
+    "SVGAnimatedPreserveAspectRatio",
+    "SVGAnimatedRect",
+    "SVGAnimatedString",
+    "SVGAnimatedTransformList",
+    "SVGAnimateElement",
+    "SVGAnimateMotionElement",
+    "SVGAnimateTransformElement",
+    "SVGAnimationElement",
+    "SVGCircleElement",
+    "SVGClipPathElement",
+    "SVGComponentTransferFunctionElement",
+    "SVGDefsElement",
+    "SVGDescElement",
+    "SVGDocument",
+    "SVGElement",
+    "SVGEllipseElement",
+    "SVGFEBlendElement",
+    "SVGFEColorMatrixElement",
+    "SVGFEComponentTransferElement",
+    "SVGFECompositeElement",
+    "SVGFEConvolveMatrixElement",
+    "SVGFEDiffuseLightingElement",
+    "SVGFEDisplacementMapElement",
+    "SVGFEDistantLightElement",
+    "SVGFEFloodElement",
+    "SVGFEFuncAElement",
+    "SVGFEFuncBElement",
+    "SVGFEFuncGElement",
+    "SVGFEFuncRElement",
+    "SVGFEGaussianBlurElement",
+    "SVGFEImageElement",
+    "SVGFEMergeElement",
+    "SVGFEMergeNodeElement",
+    "SVGFEMorphologyElement",
+    "SVGFEOffsetElement",
+    "SVGFEPointLightElement",
+    "SVGFESpecularLightingElement",
+    "SVGFESpotLightElement",
+    "SVGFETileElement",
+    "SVGFETurbulenceElement",
+    "SVGFilterElement",
+    "SVGFilterPrimitiveStandardAttributes",
+    "SVGFitToViewBox",
+    "SVGForeignObjectElement",
+    "SVGGElement",
+    "SVGGradientElement",
+    "SVGGraphicsElement",
+    "SVGImageElement",
+    "SVGLength",
+    "SVGLengthList",
+    "SVGLinearGradientElement",
+    "SVGLineElement",
+    "SVGLocatable",
+    "SVGLocatableElement",
+    "SVGMarkerElement",
+    "SVGMaskElement",
+    "SVGMatrix",
+    "SVGMetadataElement",
+    "SVGMpathElement",
+    "SVGMPathElement",
+    "SVGNumber",
+    "SVGNumberList",
+    "SVGPathElement",
+    "SVGPathSeg",
+    "SVGPathSegArcAbs",
+    "SVGPathSegArcRel",
+    "SVGPathSegClosePath",
+    "SVGPathSegCurvetoCubicAbs",
+    "SVGPathSegCurvetoCubicRel",
+    "SVGPathSegCurvetoCubicSmoothAbs",
+    "SVGPathSegCurvetoCubicSmoothRel",
+    "SVGPathSegCurvetoQuadraticAbs",
+    "SVGPathSegCurvetoQuadraticRel",
+    "SVGPathSegCurvetoQuadraticSmoothAbs",
+    "SVGPathSegCurvetoQuadraticSmoothRel",
+    "SVGPathSegLinetoAbs",
+    "SVGPathSegLinetoHorizontalAbs",
+    "SVGPathSegLinetoHorizontalRel",
+    "SVGPathSegLinetoRel",
+    "SVGPathSegLinetoVerticalAbs",
+    "SVGPathSegLinetoVerticalRel",
+    "SVGPathSegList",
+    "SVGPathSegMovetoAbs",
+    "SVGPathSegMovetoRel",
+    "SVGPatternElement",
+    "SVGPoint",
+    "SVGPointList",
+    "SVGPolygonElement",
+    "SVGPolylineElement",
+    "SVGPreserveAspectRatio",
+    "SVGRadialGradientElement",
+    "SVGRect",
+    "SVGRectElement",
+    "SVGScriptElement",
+    "SVGSetElement",
+    "SVGStopElement",
+    "SVGStringList",
+    "SVGStyleElement",
+    "SVGSVGElement",
+    "SVGSwitchElement",
+    "SVGSymbolElement",
+    "SVGTests",
+    "SVGTextContentElement",
+    "SVGTextElement",
+    "SVGTextPathElement",
+    "SVGTextPositioningElement",
+    "SVGTitleElement",
+    "SVGTransform",
+    "SVGTransformable",
+    "SVGTransformableElement",
+    "SVGTransformList",
+    "SVGTSpanElement",
+    "SVGUnitTypes",
+    "SVGURIReference",
+    "SVGUseElement",
+    "SVGViewElement",
+
+    "XULButtonElement",
+    "XULCheckboxElement",
+    "XULCommandDispatcher",
+    "XULContainerElement",
+    "XULContainerItemElement",
+    "XULControlElement",
+    "XULDescriptionElement",
+    "XULDocument",
+    "XULImageElement",
+    "XULLabelElement",
+    "XULLabeledControlElement",
+    "XULMenuListElement",
+    "XULMultiSelectControlElement",
+    "XULPopupElement",
+    "XULRelatedElement",
+    "XULSelectControlElement",
+    "XULSelectControlItemElement",
+    "XULTemplateBuilder",
+    "XULTextBoxElement",
+    "XULTreeBuilder",
+    "XULTreeElement",
+
+    "mozAudioContext",
+    "BrowserFeedWriter",
+    "CSS",
+    "DOMStringMap",
+    "WebGLBuffer",
+    "WebGLFramebuffer",
+    "WebGLProgram",
+    "WebGLRenderbuffer",
+    "WebGLShader",
+    "WebGLTexture",
+    "WebGLUniformLocation",
+    "mozContact",
+    "mozRTCIceCandidate",
+    "mozRTCPeerConnection",
+    "mozRTCSessionDescription",
+
+    "devicePixelRatio",
+    "external",
+    "mozIndexedDB",
+    "sidebar",
+    "getDefaultComputedStyle",
+
+    "Infinity",
+    "NaN",
+    "undefined",
+    "eval"
 ];
 
 domMemberMap.Location =
@@ -938,7 +1676,9 @@ domMemberMap.Location =
 
     "assign",
     "reload",
-    "replace"
+    "replace",
+
+    "QueryInterface"
 ];
 
 domMemberMap.Node =
@@ -956,6 +1696,7 @@ domMemberMap.Node =
 
     "ownerDocument",
     "parentNode",
+    "parentElement",
     "offsetParent",
     "nextSibling",
     "previousSibling",
@@ -963,6 +1704,7 @@ domMemberMap.Node =
     "lastChild",
     "childNodes",
     "attributes",
+    "contains",
 
     "dir",
     "baseURI",
@@ -989,13 +1731,16 @@ domMemberMap.Node =
     "isSupported",
     "getFeature",
     "getUserData",
-    "setUserData"
+    "setUserData",
+
+    "QueryInterface"
 ];
 
 domMemberMap.Document = Arr.extendArray(domMemberMap.Node,
 [
     "documentElement",
     "body",
+    "head",
     "title",
     "location",
     "referrer",
@@ -1041,7 +1786,6 @@ domMemberMap.Document = Arr.extendArray(domMemberMap.Node,
     "hasFocus",
     "activeElement",
 
-    /* These are also in domMemberMap.Element, but it reflects the real interface definition */
     "getElementsByClassName",
     "querySelector",
     "querySelectorAll",
@@ -1126,7 +1870,25 @@ domMemberMap.Document = Arr.extendArray(domMemberMap.Node,
     "normalizeDocument",
     "getFeature",
     "getUserData",
-    "setUserData"
+    "setUserData",
+
+    "hidden",
+    "mozFullScreen",
+    "mozFullScreenElement",
+    "mozFullScreenEnabled",
+    "mozHidden",
+    "mozPointerLockElement",
+    "mozSyntheticDocument",
+    "mozVisibilityState",
+    "currentScript",
+    "scripts",
+    "visibilityState",
+    "caretPositionFromPoint",
+    "getItems",
+    "mozCancelFullScreen",
+    "mozExitPointerLock",
+    "mozSetImageElement",
+    "releaseCapture"
 ]);
 
 domMemberMap.Element = Arr.extendArray(domMemberMap.Node,
@@ -1155,6 +1917,7 @@ domMemberMap.Element = Arr.extendArray(domMemberMap.Node,
     "dispatchEvent",
     "focus",
     "blur",
+    "click",
     "cloneNode",
     "appendChild",
     "insertBefore",
@@ -1209,10 +1972,30 @@ domMemberMap.Element = Arr.extendArray(domMemberMap.Node,
     "querySelectorAll",
     "scrollIntoView",
 
-    "onLoad",//FF4.0
-    "hidden",//FF4.0
-    "setCapture",//FF4.0
-    "releaseCapture"//FF4.0
+    "isContentEditable",
+    "dataset",
+    "contextMenu",
+    "accessKey",
+    "accessKeyLabel",
+    "outerHTML",
+    "properties",
+    "scrollLeftMax",
+    "scrollTopMax",
+    "insertAdjacentHTML",
+    "mozRequestFullScreen",
+    "mozRequestPointerLock",
+
+    "itemId",
+    "itemRef",
+    "itemScope",
+    "itemProp",
+    "itemType",
+    "itemValue",
+
+    "onload",
+    "hidden",
+    "setCapture",
+    "releaseCapture"
 ]);
 
 domMemberMap.SVGElement = Arr.extendArray(domMemberMap.Element,
@@ -1342,6 +2125,8 @@ domMemberMap.HTMLAnchorElement = Arr.extendArray(domMemberMap.Element,
     "type",
     "rel",
     "rev",
+    "ping",
+    "download",
     "charset"
 ]);
 
@@ -1421,7 +2206,15 @@ domMemberMap.HTMLTableCellElement = Arr.extendArray(domMemberMap.Element,
 
 domMemberMap.HTMLScriptElement = Arr.extendArray(domMemberMap.Element,
 [
-    "src"
+    "src",
+    "type",
+    "async",
+    "charset",
+    "crossOrigin",
+    "defer",
+    "event",
+    "htmlFor",
+    "text"
 ]);
 
 domMemberMap.HTMLButtonElement = Arr.extendArray(domMemberMap.Element,
@@ -1432,6 +2225,19 @@ domMemberMap.HTMLButtonElement = Arr.extendArray(domMemberMap.Element,
     "name",
     "type",
     "value",
+
+    "autofocus",
+    "formAction",
+    "formEnctype",
+    "formMethod",
+    "formNoValidate",
+    "formTarget",
+
+    "validity",
+    "validationMessage",
+    "willValidate",
+    "checkValidity",
+    "setCustomValidity",
 
     "click"
 ]);
@@ -1477,6 +2283,24 @@ domMemberMap.HTMLInputElement = Arr.extendArray(domMemberMap.Element,
     "placeholder",
     "required",
 
+    "height",
+    "width",
+    "inputmode",
+    "max",
+    "min",
+    "step",
+    "selectionDirection",
+    "validity",
+    "validationMessage",
+    "willValidate",
+    "checkValidity",
+    "setCustomValidity",
+    "valueAsDate",
+    "valueAsNumber",
+    "mozIsTextField",
+    "stepUp",
+    "stepDown",
+
     "click",
     "select",
     "setSelectionRange"
@@ -1498,6 +2322,10 @@ domMemberMap.HTMLFormElement = Arr.extendArray(domMemberMap.Element,
     "target",
     "text",
     "url",
+
+    "checkValidity",
+    "noValidate",
+    "autocomplete",
 
     "reset",
     "submit"
@@ -1528,6 +2356,7 @@ domMemberMap.Text = Arr.extendArray(domMemberMap.Node,
     "insertData",
     "replaceData",
     "splitText",
+    "wholeText",
     "substringData"
 ]);
 
@@ -1592,7 +2421,7 @@ domMemberMap.Event =
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
 
-var domConstantMap = Dom.domConstantMap =
+Dom.domConstantMap =
 {
     "ELEMENT_NODE": 1,
     "ATTRIBUTE_NODE": 1,
@@ -1621,6 +2450,12 @@ var domConstantMap = Dom.domConstantMap =
     "MEDIA_RULE": 1,
     "FONT_FACE_RULE": 1,
     "PAGE_RULE": 1,
+    "KEYFRAMES_RULE": 1,
+    "KEYFRAME_RULE": 1,
+    "MOZ_KEYFRAMES_RULE": 1,
+    "MOZ_KEYFRAME_RULE": 1,
+    "NAMESPACE_RULE": 1,
+    "SUPPORTS_RULE": 1,
 
     "CAPTURING_PHASE": 1,
     "AT_TARGET": 1,
@@ -1782,6 +2617,13 @@ var domConstantMap = Dom.domConstantMap =
     "DOM_VK_QUOTE": 1,
     "DOM_VK_META": 1,
 
+    "UNCACHED": 1,
+    "IDLE": 1,
+    "CHECKING": 1,
+    "DOWNLOADING": 1,
+    "UPDATEREADY": 1,
+    "OBSOLETE": 1,
+
     "SVG_ZOOMANDPAN_DISABLE": 1,
     "SVG_ZOOMANDPAN_MAGNIFY": 1,
     "SVG_ZOOMANDPAN_UNKNOWN": 1
@@ -1867,7 +2709,16 @@ Dom.domInlineEventHandlersMap =
     "onvolumechange": 1,
     "onwaiting": 1,
     "onmozfullscreenchange": 1,
-}
+    "ondevicelight": 1,
+    "ondeviceproximity": 1,
+    "onmouseenter": 1,
+    "onmouseleave": 1,
+    "onmozfullscreenerror": 1,
+    "onmozpointerlockchange": 1,
+    "onmozpointerlockerror": 1,
+    "onuserproximity": 1,
+    "onwheel": 1
+};
 
 // ********************************************************************************************* //
 // Registration

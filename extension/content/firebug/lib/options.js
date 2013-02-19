@@ -13,14 +13,11 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 
 const nsIPrefBranch = Ci.nsIPrefBranch;
-const nsIPrefBranch2 = Ci.nsIPrefBranch2;
 const PrefService = Cc["@mozilla.org/preferences-service;1"];
 
 const nsIPrefService = Ci.nsIPrefService;
 const prefService = PrefService.getService(nsIPrefService);
-const prefs = PrefService.getService(nsIPrefBranch2);
-
-const getPref = Components.utils.import("resource://firebug/loader.js", {}).FirebugLoader.getPref; 
+const prefs = PrefService.getService(nsIPrefBranch);
 
 const prefNames =  // XXXjjb TODO distribute to modules
 [
@@ -29,9 +26,8 @@ const prefNames =  // XXXjjb TODO distribute to modules
     "commandEditor", "textWrapWidth", "framePosition", "showErrorCount",
     "activateSameOrigin", "allPagesActivation", "hiddenPanels",
     "panelTabMinWidth", "sourceLinkLabelWidth", "currentVersion",
-    "useDefaultLocale", "toolbarCustomizationDone", "addonBarOpened",
-    "showBreakNotification", "showStatusIcon", "stringCropLength",
-    "showFirstRunPage",
+    "useDefaultLocale", "toolbarCustomizationDone",
+    "showBreakNotification", "stringCropLength", "showFirstRunPage",
 
     // Search
     "searchCaseSensitive", "searchGlobal", "searchUseRegularExpression",
@@ -39,9 +35,10 @@ const prefNames =  // XXXjjb TODO distribute to modules
 
     // Console
     "showJSErrors", "showJSWarnings", "showCSSErrors", "showXMLErrors",
-    "showChromeErrors", "showChromeMessages", "showExternalErrors",
+    "showChromeErrors", "showChromeMessages",
     "showXMLHttpRequests", "showNetworkErrors", "tabularLogMaxHeight",
     "consoleFilterTypes", "alwaysShowCommandLine",
+    "commandLineShowCompleterPopup",
 
     // HTML
     "showFullTextNodes", "showCommentNodes",
@@ -66,7 +63,7 @@ const prefNames =  // XXXjjb TODO distribute to modules
     // DOM
     "showUserProps", "showUserFuncs", "showDOMProps", "showDOMFuncs", "showDOMConstants",
     "ObjectShortIteratorMax", "showEnumerableProperties", "showOwnProperties",
-    "showInlineEventHandlers",
+    "showInlineEventHandlers", "showClosures",
 
     // Layout
     "showRulers",
@@ -100,6 +97,8 @@ var optionUpdateMap = {};
 var Options =
 /** @lends Options */
 {
+    prefDomain: "extensions.firebug",
+
     getPrefDomain: function()
     {
         return this.prefDomain;
@@ -232,7 +231,7 @@ var Options =
 
     togglePref: function(name)
     {
-        this.setPref(Options.prefDomain, name, !Firebug[name]);
+        this.set(name, !this.get(name));
     },
 
     get: function(name)
@@ -240,7 +239,26 @@ var Options =
         return Options.getPref(this.prefDomain, name);
     },
 
-    getPref: getPref,
+    getPref: function(prefDomain, name)
+    {
+        var prefName = prefDomain + "." + name;
+
+        var type = prefs.getPrefType(prefName);
+
+        var value = null;
+        if (type == nsIPrefBranch.PREF_STRING)
+            value = prefs.getCharPref(prefName);
+        else if (type == nsIPrefBranch.PREF_INT)
+            value = prefs.getIntPref(prefName);
+        else if (type == nsIPrefBranch.PREF_BOOL)
+            value = prefs.getBoolPref(prefName);
+
+        if (FBTrace.DBG_OPTIONS)
+            FBTrace.sysout("options.getPref "+prefName+" has type "+
+                this.getPreferenceTypeName(type)+" and value "+value);
+
+        return value;
+    },
 
     set: function(name, value)
     {
@@ -291,20 +309,19 @@ var Options =
 
     getPreferenceTypeByExample: function(prefType)
     {
+        var type = nsIPrefBranch.PREF_INVALID;
         if (prefType)
         {
             if (prefType === typeof("s"))
-                var type = nsIPrefBranch.PREF_STRING;
+                type = nsIPrefBranch.PREF_STRING;
             else if (prefType === typeof(1))
-                var type = nsIPrefBranch.PREF_INT;
-            else if (prefType === typeof (true))
-                var type = nsIPrefBranch.PREF_BOOL;
-            else
-                var type = nsIPrefBranch.PREF_INVALID;
+                type = nsIPrefBranch.PREF_INT;
+            else if (prefType === typeof(true))
+                type = nsIPrefBranch.PREF_BOOL;
         }
         else
         {
-            var type = prefs.getPrefType(prefName);
+            type = prefs.getPrefType(prefName);
         }
 
         return type;
@@ -318,6 +335,11 @@ var Options =
             return "int";
         else if (prefType == Ci.nsIPrefBranch.PREF_BOOL)
             return "boolean";
+    },
+
+    clear: function(name)
+    {
+        Options.clearPref(Options.prefDomain, name);
     },
 
     clearPref: function(prefDomain, name)
@@ -391,6 +413,11 @@ var Options =
             }
         }
     },
+
+    forceSave: function()
+    {
+        prefs.savePrefFile(null);
+    }
 };
 
 // ********************************************************************************************* //

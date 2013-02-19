@@ -54,12 +54,13 @@ CompilationUnit.BROWSER_GENERATED = "event";
 CompilationUnit.prototype.getKind = function getKind()
 {
     return this.kind;
-}
+};
 
 CompilationUnit.prototype.isExecutableLine = function isExecutableLine(lineNo)
 {
-    return this.sourceFile.isExecutableLine(lineNo);  // TODO no sourceFiles!
-}
+    // TODO no sourceFiles!
+    return this.sourceFile.isExecutableLine(lineNo);
+};
 
 /**
  * Returns the URL of this compilation unit.
@@ -103,7 +104,7 @@ CompilationUnit.prototype.getBrowserContext = function()
  */
 CompilationUnit.prototype.getBreakpoints = function()
 {
-    // return a copy of scripts so the master copy is not corrupted
+    // Return a copy of the breakpoints, so the master copy is not corrupted.
     var bps = [];
     for ( var i = 0; i < this.breakpoints.length; i++)
         bps.push(this.breakpoints[i]);
@@ -135,8 +136,8 @@ CompilationUnit.prototype.eachBreakpoint = function( fnOfLineProps )
  */
 CompilationUnit.prototype.getSourceLines = function(firstLine, lastLine, listener)
 {
-    // xxxHonza: do not cache the source lines in compilation unit
-    // The Script panel doesn't display whole script if it's downloaded
+    // xxxHonza: Do not cache the source lines in the compilation unit.
+    // The Script panel doesn't display the whole script if it's downloaded
     // partially and the following caching happens sooner.
     // Or tabCache.storeSplitLines should trigger an update.
     //if (!this.lines)

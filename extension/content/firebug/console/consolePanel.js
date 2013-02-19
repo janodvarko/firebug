@@ -11,13 +11,20 @@ define([
     "firebug/lib/search",
     "firebug/chrome/menu",
     "firebug/lib/options",
+    "firebug/lib/wrapper",
+    "firebug/lib/xpcom",
     "firebug/console/profiler",
     "firebug/chrome/searchBox"
 ],
-function(Obj, Firebug, FirebugReps, Locale, Events, Css, Dom, Search, Menu, Options) {
+function(Obj, Firebug, FirebugReps, Locale, Events, Css, Dom, Search, Menu, Options,
+    Wrapper, Xpcom) {
 
 // ********************************************************************************************* //
 // Constants
+
+var versionChecker = Xpcom.CCSV("@mozilla.org/xpcom/version-comparator;1", "nsIVersionComparator");
+var appInfo = Xpcom.CCSV("@mozilla.org/xre/app-info;1", "nsIXULAppInfo");
+var firefox15AndHigher = versionChecker.compare(appInfo.version, "15") >= 0;
 
 const Cc = Components.classes;
 const Ci = Components.interfaces;
@@ -136,7 +143,7 @@ Firebug.ConsolePanel.prototype = Obj.extend(Firebug.ActivablePanel,
 
         this.setFilter(Firebug.consoleFilterTypes);
 
-        Firebug.chrome.setGlobalAttribute("cmd_togglePersistConsole", "checked",
+        Firebug.chrome.setGlobalAttribute("cmd_firebug_togglePersistConsole", "checked",
             this.persistContent);
 
         this.showPanel(state);
@@ -148,12 +155,12 @@ Firebug.ConsolePanel.prototype = Obj.extend(Firebug.ActivablePanel,
         if (state)
             wasScrolledToBottom = state.wasScrolledToBottom;
 
-        if (typeof(wasScrolledToBottom) == "boolean")
+        if (typeof wasScrolledToBottom == "boolean")
         {
             this.wasScrolledToBottom = wasScrolledToBottom;
             delete state.wasScrolledToBottom;
         }
-        else
+        else if (typeof this.wasScrolledToBottom != "boolean")
         {
             // If the previous state doesn't says where to scroll,
             // scroll to the bottom by default.
@@ -243,16 +250,14 @@ Firebug.ConsolePanel.prototype = Obj.extend(Firebug.ActivablePanel,
                 "console.option.tip.Show_JavaScript_Warnings"),
             Menu.optionMenu("ShowCSSErrors", "showCSSErrors",
                 "console.option.tip.Show_CSS_Errors"),
-            Menu.optionMenu("ShowXMLErrors", "showXMLErrors",
-                "console.option.tip.Show_XML_Errors"),
+            Menu.optionMenu("ShowXMLHTMLErrors", "showXMLErrors",
+                "console.option.tip.Show_XML_HTML_Errors"),
             Menu.optionMenu("ShowXMLHttpRequests", "showXMLHttpRequests",
                 "console.option.tip.Show_XMLHttpRequests"),
             Menu.optionMenu("ShowChromeErrors", "showChromeErrors",
                 "console.option.tip.Show_System_Errors"),
             Menu.optionMenu("ShowChromeMessages", "showChromeMessages",
                 "console.option.tip.Show_System_Messages"),
-            Menu.optionMenu("ShowExternalErrors", "showExternalErrors",
-                "console.option.tip.Show_External_Errors"),
             Menu.optionMenu("ShowNetworkErrors", "showNetworkErrors",
                 "console.option.tip.Show_Network_Errors"),
             this.getShowStackTraceMenuItem(),
@@ -269,8 +274,10 @@ Firebug.ConsolePanel.prototype = Obj.extend(Firebug.ActivablePanel,
     {
         var menuItem = Menu.optionMenu("ShowStackTrace", "showStackTrace",
             "console.option.tip.Show_Stack_Trace");
+
         if (Firebug.currentContext && !Firebug.Debugger.isAlwaysEnabled())
             menuItem.disabled = true;
+
         return menuItem;
     },
 
@@ -285,8 +292,11 @@ Firebug.ConsolePanel.prototype = Obj.extend(Firebug.ActivablePanel,
             type: "checkbox",
             checked: strictValue,
             tooltiptext: "console.option.tip.Show_Strict_Warnings",
-            command: Obj.bindFixed(Options.setPref, Options,
-                strictDomain, strictName, !strictValue)
+            command: function()
+            {
+                var checked = this.hasAttribute("checked");
+                Options.setPref(strictDomain, strictName, checked);
+            }
         };
     },
 
@@ -298,6 +308,9 @@ Firebug.ConsolePanel.prototype = Obj.extend(Firebug.ActivablePanel,
     setFilter: function(filterTypes)
     {
         var panelNode = this.panelNode;
+
+        Events.dispatch(this.fbListeners, "onFilterSet", [logTypes]);
+
         for (var type in logTypes)
         {
             // Different types of errors and warnings are combined for filtering
@@ -448,6 +461,27 @@ Firebug.ConsolePanel.prototype = Obj.extend(Firebug.ActivablePanel,
 
     appendObject: function(object, row, rep)
     {
+        // Issue 5712:  Firefox crashes when trying to log XMLHTTPRequest to console
+        // xxxHonza: should be removed as soon as Firefox 16 is the minimum version.
+        if (!firefox15AndHigher)
+        {
+            if (typeof(object) == "object")
+            {
+                try
+                {
+                    // xxxHonza: could we log directly the unwrapped object?
+                    var unwrapped = Wrapper.unwrapObject(object);
+                    if (unwrapped.constructor.name == "XMLHttpRequest") 
+                        object = object + "";
+                }
+                catch (e)
+                {
+                    if (FBTrace.DBG_ERRORS)
+                        FBTrace.sysout("consolePanel.appendObject; EXCEPTION " + e, e);
+                }
+            }
+        }
+
         if (!rep)
             rep = Firebug.getRep(object, this.context);
 
@@ -457,18 +491,50 @@ Firebug.ConsolePanel.prototype = Obj.extend(Firebug.ActivablePanel,
         // are dynamically consumed during the rendering process.
         // This allows to derive new templates from an existing ones, without breaking
         // the default subject set within domplate() function.
-        return rep.tag.append({object: object}, row, rep);
+        try
+        {
+            return rep.tag.append({object: object}, row, rep);
+        }
+        catch (e)
+        {
+            if (FBTrace.DBG_ERRORS)
+            {
+                FBTrace.sysout("consolePanel.appendObject; EXCEPTION " + e, e);
+                FBTrace.sysout("consolePanel.appendObject; rep " + rep.className, rep);
+            }
+        }
     },
 
     appendFormatted: function(objects, row, rep)
     {
-        if (!objects || !objects.length)
-            return;
-
         function logText(text, row)
         {
+            var nodeSpan = row.ownerDocument.createElement("span");
+            Css.setClass(nodeSpan, "logRowHint");
             var node = row.ownerDocument.createTextNode(text);
-            row.appendChild(node);
+            row.appendChild(nodeSpan);
+            nodeSpan.appendChild(node);
+        }
+
+        function logTextNode(text, row)
+        {
+            var nodeSpan = row.ownerDocument.createElement("span");
+            if (text === "" || text === null || typeof(text) == "undefined")
+                Css.setClass(nodeSpan, "logRowHint");
+
+            if (text === "")
+                text = Locale.$STR("console.msg.an_empty_string");
+
+            var node = row.ownerDocument.createTextNode(text);
+            row.appendChild(nodeSpan);
+            nodeSpan.appendChild(node);
+        }
+
+        if (!objects || !objects.length)
+        {
+            // Make sure the log-row has proper height (even if empty).
+            logText(Locale.$STR("console.msg.nothing_to_output"), row);
+            return;
         }
 
         var format = objects[0];
@@ -479,12 +545,15 @@ Firebug.ConsolePanel.prototype = Obj.extend(Firebug.ActivablePanel,
             format = "";
             objIndex = 0;
         }
-        else  // a string
+        else
         {
-            if (objects.length === 1) // then we have only a string...
+            // So, we have only a string...
+            if (objects.length === 1)
             {
-                if (format.length < 1) { // ...and it has no characters.
-                    logText("(an empty string)", row);
+                // ...and it has no characters.
+                if (format.length < 1)
+                {
+                    logText(Locale.$STR("console.msg.an_empty_string"), row);
                     return;
                 }
             }
@@ -508,32 +577,46 @@ Firebug.ConsolePanel.prototype = Obj.extend(Firebug.ActivablePanel,
             }
         }
 
+        // Last CSS style defined using "%c" that should be applied on
+        // created log-row parts (elements). See issue 6064.
+        // Example: console.log('%cred-text %cgreen-text', 'color:red', 'color:green');
+        var lastStyle;
+
         for (var i = 0; i < parts.length; ++i)
         {
+            var node;
             var part = parts[i];
             if (part && typeof(part) == "object")
             {
-                var object = objects[objIndex++];
+                var object = objects[objIndex];
                 if (part.type == "%c")
-                    row.setAttribute("style", object.toString());
-                else if (typeof(object) != "undefined")
-                    this.appendObject(object, row, part.rep);
+                    lastStyle = object.toString();
+                else if (objIndex < objects.length)
+                    node = this.appendObject(object, row, part.rep);
                 else
-                    this.appendObject(part.type, row, FirebugReps.Text);
+                    node = this.appendObject(part.type, row, FirebugReps.Text);
+                objIndex++;
             }
             else
             {
-                FirebugReps.Text.tag.append({object: part}, row);
+                node = FirebugReps.Text.tag.append({object: part}, row);
             }
+
+            // Apply custom style if available.
+            if (lastStyle && node)
+                node.setAttribute("style", lastStyle);
+
+            node = null;
         }
 
         for (var i = objIndex; i < objects.length; ++i)
         {
-            logText(" ", row);
+            logTextNode(" ", row);
+
             var object = objects[i];
             if (typeof(object) == "string")
-                FirebugReps.Text.tag.append({object: object}, row);
-            else
+                logTextNode(object, row);
+            else 
                 this.appendObject(object, row);
         }
     },
@@ -692,6 +775,16 @@ Firebug.ConsolePanel.prototype = Obj.extend(Firebug.ActivablePanel,
         if (this.wasScrolledToBottom)
             Dom.scrollToBottom(this.panelNode);
     },
+
+    showInfoTip: function(infoTip, target, x, y)
+    {
+        var object = Firebug.getRepObject(target);
+        var rep = Firebug.getRep(object, this.context);
+        if (!rep)
+            return false;
+
+        return rep.showInfoTip(infoTip, target, x, y);
+    }
 });
 
 // ********************************************************************************************* //

@@ -2,6 +2,7 @@
 
 define([
     "firebug/lib/object",
+    "firebug/chrome/firefox",
     "firebug/firebug",
     "firebug/dom/toggleBranch",
     "firebug/lib/events",
@@ -9,16 +10,17 @@ define([
     "firebug/lib/css",
     "firebug/js/stackFrame",
     "firebug/lib/locale",
+    "firebug/lib/string",
     "firebug/dom/domPanel",     // Firebug.DOMBasePanel, Firebug.DOMPanel.DirTable
 ],
-function(Obj, Firebug, ToggleBranch, Events, Dom, Css, StackFrame, Locale) {
+function(Obj, Firefox, Firebug, ToggleBranch, Events, Dom, Css, StackFrame, Locale, Str) {
 
 // ********************************************************************************************* //
 // Watch Panel
 
 Firebug.WatchPanel = function()
 {
-}
+};
 
 /**
  * Represents the Watch side panel available in the Script panel.
@@ -121,7 +123,7 @@ Firebug.WatchPanel.prototype = Obj.extend(Firebug.DOMBasePanel.prototype,
         if (frame instanceof StackFrame.StackFrame)
             scopes = frame.getScopes(Firebug.viewChrome);
         else
-            scopes = [this.context.getGlobalScope()];
+            scopes = [this.context.getCurrentGlobal()];
 
         if (FBTrace.DBG_STACK)
             FBTrace.sysout("dom watch frame isStackFrame " +
@@ -130,6 +132,7 @@ Firebug.WatchPanel.prototype = Obj.extend(Firebug.DOMBasePanel.prototype,
 
         var members = [];
 
+        var context = this.context;
         if (this.watches)
         {
             for (var i = 0; i < this.watches.length; ++i)
@@ -137,7 +140,7 @@ Firebug.WatchPanel.prototype = Obj.extend(Firebug.DOMBasePanel.prototype,
                 var expr = this.watches[i];
                 var value = null;
 
-                Firebug.CommandLine.evaluate(expr, this.context, null, this.context.getGlobalScope(),
+                Firebug.CommandLine.evaluate(expr, context, null, context.getCurrentGlobal(),
                     function success(result, context)
                     {
                         value = result;
@@ -149,11 +152,13 @@ Firebug.WatchPanel.prototype = Obj.extend(Firebug.DOMBasePanel.prototype,
                     }
                 );
 
-                this.addMember(scopes[0], "watch", members, expr, value, 0);
+                this.addMember(scopes[0], "watch", members, expr, value, 0, 0, context);
 
                 if (FBTrace.DBG_DOM)
-                    FBTrace.sysout("watch.updateSelection " + expr + " = " + value,
-                        {expr: expr, value: value, members: members})
+                {
+                    FBTrace.sysout("watch.updateSelection \"" + expr + "\"",
+                        {expr: expr, value: value, members: members});
+                }
             }
         }
 
@@ -161,16 +166,16 @@ Firebug.WatchPanel.prototype = Obj.extend(Firebug.DOMBasePanel.prototype,
         {
             var thisVar = frame.getThisValue();
             if (thisVar)
-                this.addMember(scopes[0], "user", members, "this", thisVar, 0);
+                this.addMember(scopes[0], "user", members, "this", thisVar, 0, 0, context);
 
             // locals, pre-expanded
-            members.push.apply(members, this.getMembers(scopes[0], 0, this.context));
+            members.push.apply(members, this.getMembers(scopes[0], 0, context));
 
             for (var i=1; i<scopes.length; i++)
-                this.addMember(scopes[i], "scopes", members, scopes[i].toString(), scopes[i], 0);
+                this.addMember(scopes[i], "scopes", members, scopes[i].toString(), scopes[i], 0, 0, context);
         }
 
-        this.expandMembers(members, this.toggles, 0, 0, this.context);
+        this.expandMembers(members, this.toggles, 0, 0, context);
         this.showMembers(members, false);
 
         if (FBTrace.DBG_STACK)
@@ -187,12 +192,23 @@ Firebug.WatchPanel.prototype = Obj.extend(Firebug.DOMBasePanel.prototype,
 
     showEmptyMembers: function()
     {
-        this.tag.replace({domPanel: this, toggles: new ToggleBranch.ToggleBranch()},
+        var domTable = this.tag.replace({domPanel: this, toggles: new ToggleBranch.ToggleBranch()},
             this.panelNode);
+
+        // The direction needs to be adjusted according to the direction
+        // of the user agent. See issue 5073.
+        // TODO: Set the direction at the <body> to allow correct formatting of all relevant parts.
+        // This requires more adjustments related for rtl user agents.
+        var mainFrame = Firefox.getElementById("fbMainFrame");
+        var cs = mainFrame.ownerDocument.defaultView.getComputedStyle(mainFrame);
+        var watchRow = domTable.getElementsByClassName("watchNewRow").item(0);
+        watchRow.style.direction = cs.direction;
     },
 
     addWatch: function(expression)
     {
+        expression = Str.trim(expression);
+
         if (FBTrace.DBG_WATCH)
             FBTrace.sysout("Firebug.WatchPanel.addWatch; expression: "+expression);
 
@@ -251,6 +267,19 @@ Firebug.WatchPanel.prototype = Obj.extend(Firebug.DOMBasePanel.prototype,
         this.watches.splice(rowIndex, 1);
         this.rebuild(true);
 
+        this.context.setTimeout(Obj.bindFixed(function()
+        {
+            this.showToolbox(null);
+        }, this));
+    },
+
+    // deletes all the watches
+    deleteAllWatches: function()
+    {
+        if (FBTrace.DBG_WATCH)
+            FBTrace.sysout("Firebug.WatchPanel.deleteAllWatches");
+        this.watches = [];
+        this.rebuild(true);
         this.context.setTimeout(Obj.bindFixed(function()
         {
             this.showToolbox(null);
@@ -338,7 +367,7 @@ Firebug.WatchPanel.prototype = Obj.extend(Firebug.DOMBasePanel.prototype,
             return;
 
         var row = Dom.getAncestorByClass(target, "memberRow");
-        if (!row) 
+        if (!row || row.domObject.ignoredPath)
             return;
 
         var path = this.getPropertyPath(row);
@@ -356,6 +385,37 @@ Firebug.WatchPanel.prototype = Obj.extend(Firebug.DOMBasePanel.prototype,
            command: Obj.bindFixed(this.addWatch, this, path.join(""))
         });
     },
+
+    getContextMenuItems: function(object, target)
+    {
+        var items = Firebug.DOMBasePanel.prototype.getContextMenuItems.apply(this, arguments);
+
+        if (!this.watches || this.watches.length == 0)
+            return items;
+
+        // find the index of "DeletePropery" in the items:
+        var deleteWatchIndex = items.map(function(item)
+        {
+            return item.id;
+        }).indexOf("DeleteProperty");
+
+        // if DeleteWatch was found, we insert DeleteAllWatches after it
+        // otherwise, we insert the item at the beginning of the menu
+        var deleteAllWatchesIndex = (deleteWatchIndex >= 0) ? deleteWatchIndex + 1 : 0;
+
+        if (FBTrace.DBG_WATCH)
+            FBTrace.sysout("insert DeleteAllWatches at: "+ deleteAllWatchesIndex);
+
+        // insert DeleteAllWatches after DeleteWatch
+        items.splice(deleteAllWatchesIndex, 0, {
+            id: "fbDeleteAllWatches",
+            label: "DeleteAllWatches",
+            tooltiptext: "watch.tip.Delete_All_Watches",
+            command: Obj.bindFixed(this.deleteAllWatches, this)
+        });
+
+        return items;
+    }
 });
 
 // ********************************************************************************************* //
@@ -364,8 +424,11 @@ Firebug.WatchPanel.prototype = Obj.extend(Firebug.DOMBasePanel.prototype,
 function getWatchRowIndex(row)
 {
     var index = -1;
-    for (; row && Css.hasClass(row, "watchRow"); row = row.previousSibling)
-        ++index;
+    for (; row; row = row.previousSibling)
+    {
+        if (Css.hasClass(row, "watchRow"))
+            ++index;
+    }
     return index;
 }
 

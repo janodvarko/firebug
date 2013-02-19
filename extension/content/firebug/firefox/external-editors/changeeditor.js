@@ -29,7 +29,7 @@ function onLoad()
         origImage = FBL.getIconURLForFile(item.executable);
         try
         {
-            var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+            var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
             file.initWithPath(item.executable);
             document.getElementById("executable").file = file;
             origLabel = file.leafName.replace(".exe","");
@@ -123,7 +123,7 @@ function onAccept()
 
     try
     {
-        var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+        var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
         file.initWithPath(item.executable);
         if (!file.isExecutable())
            throw "NotAnExecutable";
@@ -195,12 +195,12 @@ function onBrowse()
 
 function insertText(text, whole)
 {
-    var textbox = document.getElementById("cmdline")
+    var textbox = document.getElementById("cmdline");
     if(whole)
         textbox.select();
 
     textbox.editor.QueryInterface(Components.interfaces.nsIPlaintextEditor).insertText(text);
-    textbox.focus()
+    textbox.focus();
 }
 
 // ************************************************************************************************
@@ -217,7 +217,7 @@ var defaultCommandLines =
     "explorer":                       "/select,%file",
     "wget/curl":                      "%url",
     "firefox":                        "http://validator.w3.org/check?uri=%url"
-}
+};
 
 function suggestionPopupShowing(popup)
 {
@@ -236,10 +236,10 @@ function suggestionPopupShowing(popup)
 
         label = document.createElement('label');
         label.setAttribute('value', defaultCommandLines[i]);
-        label.className = 'text-link'
+        label.className = 'text-link';
         box.appendChild(label);
 
-        popup.appendChild(box)
+        popup.appendChild(box);
     }
 }
 
@@ -266,6 +266,4 @@ var testEditor = function()
 
     var Firebug = opener.opener.Firebug;
     Firebug.ExternalEditors.open(Firebug.Firefox.getCurrentBrowser().currentURI.spec, 5, tmpItem);
-}
-
-
+};

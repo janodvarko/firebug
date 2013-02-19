@@ -22,6 +22,7 @@ define([
     "firebug/chrome/menu",
     "firebug/net/netUtils",
     "firebug/net/netProgress",
+    "firebug/css/cssReps",
     "firebug/js/breakpoint",
     "firebug/net/xmlViewer",
     "firebug/net/svgViewer",
@@ -36,7 +37,7 @@ define([
 ],
 function(Obj, Firebug, Firefox, Domplate, Xpcom, Locale,
     Events, Options, Url, SourceLink, Http, Css, Dom, Win, Search, Str,
-    Arr, System, Menu, NetUtils, NetProgress) {
+    Arr, System, Menu, NetUtils, NetProgress, CSSInfoTip) {
 
 with (Domplate) {
 
@@ -187,7 +188,7 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
         this.showToolbarButtons("fbNetButtons", enabled);
 
         if (enabled)
-            Firebug.chrome.setGlobalAttribute("cmd_togglePersistNet", "checked", this.persistContent);
+            Firebug.chrome.setGlobalAttribute("cmd_firebug_togglePersistNet", "checked", this.persistContent);
         else
             this.table = null;
 
@@ -311,7 +312,7 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
             tooltiptext: "net.option.tip.Disable_Browser_Cache",
             command: function()
             {
-                BrowserCache.toggle(!this.getAttribute("checked"));
+                BrowserCache.toggle(!this.hasAttribute("checked"));
             }
         };
     },
@@ -326,6 +327,7 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
 
         var object = Firebug.getObjectByURL(this.context, file.href);
         var isPost = NetUtils.isURLEncodedRequest(file, this.context);
+        var params = Url.parseURLParams(file.href);
 
         items.push(
             {
@@ -335,6 +337,18 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
             }
         );
 
+        if (params.length > 0)
+        {
+            items.push(
+                {
+                    id: "fbCopyUrlParameters",
+                    label: "CopyURLParameters",
+                    tooltiptext: "net.tip.Copy_URL_Parameters",
+                    command: Obj.bindFixed(this.copyURLParams, this, file)
+                }
+            );
+        }
+
         if (isPost)
         {
             items.push(
@@ -342,6 +356,12 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
                     label: "CopyLocationParameters",
                     tooltiptext: "net.tip.Copy_Location_Parameters",
                     command: Obj.bindFixed(this.copyParams, this, file)
+                },
+                {
+                    id: "fbCopyPOSTParameters",
+                    label: "CopyPOSTParameters",
+                    tooltiptext: "net.tip.Copy_POST_Parameters",
+                    command: Obj.bindFixed(this.copyPOSTParams, this, file)
                 }
             );
         }
@@ -452,7 +472,31 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
         return items;
     },
 
+    // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
     // Context menu commands
+
+    copyURLParams: function(file)
+    {
+        var params = Url.parseURLParams(file.href);
+        var result = params.map(function(o) { return o.name + "=" + o.value; });
+        System.copyToClipboard(result.join(Str.lineBreak()));
+    },
+
+    copyPOSTParams: function(file)
+    {
+        if (!NetUtils.isURLEncodedRequest(file, this.context))
+            return;
+
+        var text = NetUtils.getPostText(file, this.context, true);
+        if (text)
+        {
+            var lines = text.split("\n");
+            var params = Url.parseURLEncodedText(lines[lines.length-1]);
+            var result = params.map(function(o) { return o.name + "=" + o.value; });
+            System.copyToClipboard(result.join(Str.lineBreak()));
+        }
+    },
+
     copyParams: function(file)
     {
         var text = NetUtils.getPostText(file, this.context, true);
@@ -512,7 +556,7 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
                 currFile.row.removeAttribute("breakpoint");
             else
                 currFile.row.setAttribute("breakpoint", "true");
-        })
+        });
     },
 
     stopLoading: function(file)
@@ -561,7 +605,7 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
         return this.conditionEditor;
     },
 
-    // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
+    // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
     // Activable Panel
 
     /**
@@ -642,7 +686,7 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
                     return true;
 
                 this.infoTipURL = infoTipURL;
-                return Firebug.InfoTip.populateImageInfoTip(infoTip, row.repObject.href);
+                return CSSInfoTip.populateImageInfoTip(infoTip, row.repObject.href);
             }
         }
 
@@ -715,7 +759,7 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
             if(this.currentSearch.shouldSearchResponses() &&
                 Dom.getAncestorByClass(row, "netInfoResponseText"))
             {
-                this.highlightNode(row)
+                this.highlightNode(row);
             }
             else
             {
@@ -919,10 +963,10 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
             }
 
             var remoteIPLabel = row.querySelector(".netRemoteAddressCol .netAddressLabel");
-            remoteIPLabel.innerHTML = NetRequestEntry.getRemoteAddress(file);
+            remoteIPLabel.textContent = NetRequestEntry.getRemoteAddress(file);
 
             var localIPLabel = row.querySelector(".netLocalAddressCol .netAddressLabel");
-            localIPLabel.innerHTML = NetRequestEntry.getLocalAddress(file);
+            localIPLabel.textContent = NetRequestEntry.getLocalAddress(file);
 
             if (file.requestHeaders)
                 Css.setClass(row, "hasHeaders");
@@ -944,7 +988,7 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
 
             var netBar = Dom.getChildByClass(row, "netTimeCol").childNodes[1];
             var timeLabel = Dom.getChildByClass(netBar, "netReceivingBar").firstChild;
-            timeLabel.innerHTML = NetRequestEntry.getElapsedTime({elapsed: this.elapsed});
+            timeLabel.textContent = NetRequestEntry.getElapsedTime({elapsed: this.elapsed});
 
             if (file.loaded)
                 Css.setClass(row, "loaded");
@@ -1117,7 +1161,7 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
             fileCount += summary.fileCount;
             totalSize += summary.totalSize;
             cachedSize += summary.cachedSize;
-            totalTime += summary.totalTime
+            totalTime += summary.totalTime;
         }
 
         var row = this.summaryRow;
@@ -1145,7 +1189,7 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
             timeText += " (onload: " + NetRequestEntry.formatTime(loadTime) + ")";
         }
 
-        timeLabel.innerHTML = timeText;
+        timeLabel.textContent = timeText;
     },
 
     summarizePhase: function(phase, rightNow)
@@ -1190,7 +1234,7 @@ NetPanel.prototype = Obj.extend(Firebug.ActivablePanel,
 
         var totalTime = maxTime - minTime;
         return {cachedSize: cachedSize, totalSize: totalSize, totalTime: totalTime,
-                fileCount: fileCount}
+                fileCount: fileCount};
     },
 
     updateLogLimit: function(limit)
@@ -1435,7 +1479,7 @@ Firebug.NetMonitor.NetFileLink = function(href, request)
 {
     this.href = href;
     this.request = request;
-}
+};
 
 Firebug.NetMonitor.NetFileLink.prototype =
 {
@@ -1550,13 +1594,13 @@ var NetPanelSearch = function(panel, rowFinder)
         searchRange.setEnd(this.currentRow, this.currentRow.childNodes.length);
 
         startPt = searchRange;
-    }
+    };
 
     this.getFirstRow = function()
     {
         var table = panelNode.getElementsByClassName("netTable").item(0);
         return table.querySelector(".netTableBody").firstChild;
-    }
+    };
 
     this.getNextRow = function(wrapAround, reverse)
     {
@@ -1570,12 +1614,12 @@ var NetPanelSearch = function(panel, rowFinder)
         }
 
         return wrapAround ? this.getFirstRow() : null;
-    }
+    };
 
     this.shouldSearchResponses = function()
     {
         return Firebug["netSearchResponseBody"];
-    }
+    };
 };
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * *
@@ -1583,7 +1627,7 @@ var NetPanelSearch = function(panel, rowFinder)
 Firebug.NetMonitor.ConditionEditor = function(doc)
 {
     Firebug.Breakpoint.ConditionEditor.apply(this, arguments);
-}
+};
 
 Firebug.NetMonitor.ConditionEditor.prototype = domplate(Firebug.Breakpoint.ConditionEditor.prototype,
 {
@@ -1622,7 +1666,7 @@ Firebug.NetMonitor.BrowserCache =
         Options.setPref(this.cacheDomain, "disk.enable", state);
         Options.setPref(this.cacheDomain, "memory.enable", state);
     }
-}
+};
 
 // ********************************************************************************************* //
 // Registration

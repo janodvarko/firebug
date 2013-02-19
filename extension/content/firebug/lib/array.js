@@ -8,18 +8,54 @@ function(FBTrace) {
 // ********************************************************************************************* //
 // Constants
 
+const Ci = Components.interfaces;
+const Cu = Components.utils;
 var Arr = {};
 
 // ********************************************************************************************* //
 // Arrays
 
-Arr.isArray = function(obj)
+Arr.isArray = Array.isArray || function(obj)
 {
-    if (Array.isArray)
-        return Array.isArray(obj);
-
     return Object.prototype.toString.call(obj) === "[object Array]";
-}
+};
+
+Arr.isArrayLike = function(obj)
+{
+    try
+    {
+        if (typeof obj !== "object")
+            return false;
+        if (!isFinite(obj.length))
+            return false;
+        if (Arr.isArray(obj))
+            return true;
+        if (typeof obj.callee === "function") // arguments
+            return true;
+        if (typeof obj.splice === "function") // jQuery etc.
+            return true;
+        if (Arr._isDOMTokenList(obj))
+            return true;
+        var str = Object.prototype.toString.call(obj);
+        if (str === "[object HTMLCollection]" || str === "[object NodeList]")
+            return true;
+    }
+    catch (exc) {}
+    return false;
+};
+
+Arr._isDOMTokenList = function(obj)
+{
+    // When minVersion is 19 or so, we can replace this whole function with
+    // (Object.prototype.toString.call(obj) === "[object DOMTokenList]").
+    try
+    {
+        var uwGlobal = XPCNativeWrapper.unwrap(Cu.getGlobalForObject(obj));
+        return obj instanceof uwGlobal.DOMTokenList;
+    }
+    catch (exc) {}
+    return false;
+};
 
 // At least sometimes the keys will be on user-level window objects
 Arr.keys = function(map)
@@ -91,17 +127,17 @@ Arr.sliceArray = function(array, index)
 
 Arr.cloneArray = function(array, fn)
 {
-   var newArray = [];
+   var newArray = [], len = array.length;
 
    if (fn)
-       for (var i = 0; i < array.length; ++i)
+       for (var i = 0; i < len; ++i)
            newArray.push(fn(array[i]));
    else
-       for (var i = 0; i < array.length; ++i)
+       for (var i = 0; i < len; ++i)
            newArray.push(array[i]);
 
    return newArray;
-}
+};
 
 Arr.extendArray = function(array, array2)
 {
@@ -109,7 +145,7 @@ Arr.extendArray = function(array, array2)
    newArray.push.apply(newArray, array);
    newArray.push.apply(newArray, array2);
    return newArray;
-}
+};
 
 Arr.arrayInsert = function(array, index, other)
 {
@@ -117,7 +153,7 @@ Arr.arrayInsert = function(array, index, other)
        array.splice(i+index, 0, other[i]);
 
    return array;
-}
+};
 
 /**
  * Filter out unique values of an array, saving only the first occurrence of

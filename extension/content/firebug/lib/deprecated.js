@@ -17,7 +17,7 @@ var consoleService = Cc["@mozilla.org/consoleservice;1"].getService(Ci["nsIConso
 // Module implementation
 
 var Deprecated = {};
-Deprecated.deprecated = function(msg, fnc)
+Deprecated.deprecated = function(msg, fnc, args)
 {
     return function deprecationWrapper()
     {
@@ -31,8 +31,8 @@ Deprecated.deprecated = function(msg, fnc)
             {
                 FBTrace.sysout(explain, getStackDump());
 
-                if (exc.stack)
-                    exc.stack = exc.stack.split("\n");
+                //if (exc.stack)
+                //    exc.stack = exc.stack.split("\n");
 
                 FBTrace.sysout(explain + " " + caller.toString());
             }
@@ -43,9 +43,9 @@ Deprecated.deprecated = function(msg, fnc)
             this.nagged = true;
         }
 
-        return fnc.apply(this, arguments);
-    }
-}
+        return fnc.apply(this, args || arguments);
+    };
+};
 
 // ********************************************************************************************* //
 // Local helpers

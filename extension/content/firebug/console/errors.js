@@ -31,8 +31,8 @@ const reUncaught = /uncaught exception/;
 // see http://lxr.mozilla.org/mozilla/source/js/src/xpconnect/src/xpcexception.cpp#347
 // and http://lxr.mozilla.org/mozilla/source/js/src/xpconnect/src/xpcstack.cpp#318
 // and http://lxr.mozilla.org/mozilla/source/dom/src/base/nsDOMException.cpp#351
-const reException1 = /^(?:uncaught exception: )?\[Exception... "(?!<no message>)([\s\S]+)"  nsresult: "0x\S+ \((.+)\)"  location: "(?:(?:JS|native) frame :: (?!<unknown filename>)(.+) :: .+ :: line (\d+)|<unknown>)"  data: (?:yes|no)\]$/
-const reException2 = /^(?:uncaught exception: )?\[Exception... "(?!<no message>)([\s\S]+)"  code: "\d+" nsresult: "0x\S+ \((.+)\)"  location: "(?:(.+) Line: (\d+)|<unknown>)"\]$/
+const reException1 = /^(?:uncaught exception: )?\[Exception... "(?!<no message>)([\s\S]+)"  nsresult: "0x\S+ \((.+)\)"  location: "(?:(?:JS|native) frame :: (?!<unknown filename>)(.+) :: .+ :: line (\d+)|<unknown>)"  data: (?:yes|no)\]$/;
+const reException2 = /^(?:uncaught exception: )?\[Exception... "(?!<no message>)([\s\S]+)"  code: "\d+" nsresult: "0x\S+ \((.+)\)"  location: "(?:(.+) Line: (\d+)|<unknown>)"\]$/;
 const pointlessErrors =
 {
     "uncaught exception: Permission denied to call method Location.toString": 1,
@@ -125,7 +125,7 @@ var Errors = Firebug.Errors = Obj.extend(Firebug.Module,
 
     increaseCount: function(context)
     {
-        this.setCount(context, context.errorCount + 1)
+        this.setCount(context, context.errorCount + 1);
     },
 
     setCount: function(context, count)
@@ -146,6 +146,9 @@ var Errors = Firebug.Errors = Obj.extend(Firebug.Module,
 
     startObserving: function()
     {
+        if (this.isObserving)
+            return;
+
         if (FBTrace.DBG_ERRORLOG)
             FBTrace.sysout("Errors.startObserving");
 
@@ -157,6 +160,9 @@ var Errors = Firebug.Errors = Obj.extend(Firebug.Module,
 
     stopObserving: function()
     {
+        if (!this.isObserving)
+            return;
+
         if (FBTrace.DBG_ERRORLOG)
             FBTrace.sysout("Errors.stopObserving");
 
@@ -349,6 +355,7 @@ var Errors = Firebug.Errors = Obj.extend(Firebug.Module,
         {
             FBTrace.sysout("errors.observe logScriptError " +
                 (Firebug.errorStackTrace ? "have " : "NO ") +
+                (Firebug.showStackTrace ? "show stack trace" : "do not show stack trace ") +
                 "errorStackTrace error object:",
                 {object: object, errorStackTrace: Firebug.errorStackTrace});
         }
@@ -364,24 +371,17 @@ var Errors = Firebug.Errors = Obj.extend(Firebug.Module,
         if (object.columnNumber > 0)
             error.colNumber = object.columnNumber;
 
-        if (Firebug.showStackTrace && Firebug.errorStackTrace)
-        {
-            // Firebug.errorStackTrace is set in onError (JSD hook).
-            // However it can happen that the stack trace doesn't belong to the error
-            // happening here (e.g. onError is not executed for throws).
-            // So, use the url and line number to check whether the remembered stack
-            // corresponds to what the current error says (see issue 5400).
-            // Note that this can exclude come stacks:
-            // see https://bugzilla.mozilla.org/show_bug.cgi?id=703519
-            var trace = Firebug.errorStackTrace;
-            var frame = (trace.frames && trace.frames[0]) ? trace.frames[0] : null;
-            if (frame && frame.href == error.href && frame.line == error.lineNo)
-                error.correctWithStackTrace(trace);
-        }
-        else if (checkForUncaughtException(context, object))
+        if (checkForException(context, object))
         {
             context = getExceptionContext(context, object);
             correctLineNumbersOnExceptions(object, error);
+        }
+
+        if (Firebug.errorStackTrace)
+        {
+            error.correctWithStackTrace(Firebug.errorStackTrace);
+            if (!Firebug.showStackTrace)
+                error.trace = null;
         }
 
         var msgId = lessTalkMoreAction(context, object, isWarning);
@@ -610,7 +610,6 @@ var Errors = Firebug.Errors = Obj.extend(Firebug.Module,
             showXMLErrors: 1,
             showChromeErrors: 1,
             showChromeMessages: 1,
-            showExternalErrors: 1,
             showXMLHttpRequests: 1,
             showStackTrace: 1
         };
@@ -676,6 +675,7 @@ const categoryMap =
     "DOM": "js",
     "Events": "js",
     "CSS": "css",
+    "HTML": "xml",
     "XML": "xml",
     "malformed-xml": "xml"
 };
@@ -714,9 +714,10 @@ function whyNotShown(url, categoryList, isWarning)
         {
             return "showCSSErrors";
         }
-        else if ((category == "XML" || category == "malformed-xml" ) && !Firebug.showXMLErrors)
+        else if ((category == "HTML" || category == "XML" || category == "malformed-xml" ) &&
+            !Firebug.showXMLErrors)
         {
-            return "showXMLErors";
+            return "showXMLErrors";
         }
         else if ((category == "javascript" || category == "JavaScript" || category == "DOM")
                 && !isWarning && !Firebug.showJSErrors)
@@ -739,31 +740,6 @@ function whyNotShown(url, categoryList, isWarning)
         return "showChromeErrors";
 
     return null;
-}
-
-function domainFilter(url)  // never called?
-{
-    if (Firebug.showExternalErrors)
-        return true;
-
-    var browserWin = document.getElementById("content").contentWindow;
-
-    var m = urlRe.exec(browserWin.location.href);
-    if (!m)
-        return false;
-
-    var browserDomain = m[3];
-
-    m = urlRe.exec(url);
-    if (!m)
-        return false;
-
-    var errorScheme = m[1];
-    var errorDomain = m[3];
-
-    return errorScheme == "javascript"
-        || errorScheme == "chrome"
-        || errorDomain == browserDomain;
 }
 
 function lessTalkMoreAction(context, object, isWarning)
@@ -822,39 +798,28 @@ function lessTalkMoreAction(context, object, isWarning)
     return msgId;
 }
 
-function checkForUncaughtException(context, object)
+function checkForException(context, object)
 {
     if (object.flags & object.exceptionFlag)
     {
         if (FBTrace.DBG_ERRORLOG)
             FBTrace.sysout("errors.observe is exception");
 
-        if (reUncaught.test(object.errorMessage))
+        if (context.thrownStackTrace)
         {
+            Firebug.errorStackTrace = context.thrownStackTrace;
+
             if (FBTrace.DBG_ERRORLOG)
-                FBTrace.sysout("uncaught exception matches " + reUncaught);
+                FBTrace.sysout("errors.observe trace.frames", context.thrownStackTrace.frames);
 
-            if (context.thrownStackTrace)
-            {
-                Firebug.errorStackTrace = context.thrownStackTrace;
-
-                if (FBTrace.DBG_ERRORLOG)
-                    FBTrace.sysout("errors.observe trace.frames", context.thrownStackTrace.frames);
-
-                delete context.thrownStackTrace;
-            }
-            else
-            {
-                 if (FBTrace.DBG_ERRORLOG)
-                    FBTrace.sysout("errors.observe NO context.thrownStackTrace");
-            }
-            return true;
+            delete context.thrownStackTrace;
         }
         else
         {
-            if (FBTrace.DBG_ERRORLOG)
-                FBTrace.sysout("errors.observe not an uncaught exception");
+             if (FBTrace.DBG_ERRORLOG)
+                FBTrace.sysout("errors.observe NO context.thrownStackTrace");
         }
+        return true;
     }
 
     delete context.thrownStackTrace;
@@ -863,7 +828,7 @@ function checkForUncaughtException(context, object)
 
 /**
  * Returns a parent window (outer window) for given error object (an object
- * that is passed to a consoleListener).
+ * that is passed into a consoleListener).
  * This method should be the primary way how to find the parent window for any
  * error object.
  *
@@ -910,7 +875,7 @@ function getErrorWindow(object)
 
 function getExceptionContext(context, object)
 {
-    var errorWin = getErrorWindow(object)
+    var errorWin = getErrorWindow(object);
     if (errorWin)
     {
         var errorContext = Firebug.connection.getContextByWindow(errorWin);

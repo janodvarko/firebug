@@ -12,7 +12,6 @@ function(FBTrace, Http, Firefox) {
 
 var Ci = Components.interfaces;
 var Cc = Components.classes;
-var Cu = Components.utils;
 
 var wm = Cc["@mozilla.org/appshell/window-mediator;1"].getService(Ci.nsIWindowMediator);
 
@@ -101,9 +100,17 @@ Win.getRootWindow = function(win)
 {
     for (; win; win = win.parent)
     {
-        if (!win.parent || win == win.parent || !(win.parent instanceof win.Window) )
+        if (!win.parent || win == win.parent)
+            return win;
+
+        // When checking the 'win.parent' type we need to use the target
+        // type from the same scope. i.e. from win.parent
+        // Iframes from different domains can use different Window type than
+        // the top level window.
+        if (!(win.parent instanceof win.parent.Window))
             return win;
     }
+
     return null;
 };
 
@@ -126,6 +133,13 @@ Win.openNewTab = function(url, postText)
     }
 
     var tabBrowser = Firefox.getTabBrowser();
+    if (!tabBrowser)
+    {
+        if (FBTrace.DBG_ERRORS)
+            FBTrace.sysout("window.openNewTab; ERROR No tabBrowser!");
+        return;
+    }
+
     return tabBrowser.selectedTab = tabBrowser.addTab(url, null, null, postData);
 };
 
@@ -159,7 +173,7 @@ Win.iterateBrowserTabs = function(browserWindow, callback)
     }
 
     return false;
-}
+};
 
 
 Win.getBrowserByWindow = function(win)
@@ -173,18 +187,19 @@ Win.getBrowserByWindow = function(win)
     }
 
     return null;
-}
+};
 
 // ********************************************************************************************* //
 
 Win.getWindowId = function(win)
 {
     var util = win.QueryInterface(Ci.nsIInterfaceRequestor).getInterface(Ci.nsIDOMWindowUtils);
+    var outerWindowID = null;
     var innerWindowID = "(none)";
 
     try
     {
-        var outerWindowID = util.outerWindowID;
+        outerWindowID = util.outerWindowID;
         innerWindowID = util.currentInnerWindowID;
     }
     catch(exc)

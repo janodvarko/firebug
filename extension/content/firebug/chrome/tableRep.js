@@ -19,10 +19,10 @@ with (Domplate) {
 FirebugReps.Table = domplate(Firebug.Rep,
 {
     className: "table",
-
+    tableClassName: "dataTable",
     tag:
         DIV({"class": "dataTableSizer", "tabindex": "-1" },
-            TABLE({"class": "dataTable", cellspacing: 0, cellpadding: 0, width: "100%",
+            TABLE({"class": "$tableClassName", cellspacing: 0, cellpadding: 0, width: "100%",
                 "role": "grid"},
                 THEAD({"class": "dataTableThead", "role": "presentation"},
                     TR({"class": "headerRow focusRow dataTableRow subFocusRow", "role": "row",
@@ -71,6 +71,7 @@ FirebugReps.Table = domplate(Firebug.Rep,
             return [row];
 
         var cols = [];
+        var value = null;
         for (var i=0; i<this.columns.length; i++)
         {
             var prop = this.columns[i].property;
@@ -88,7 +89,7 @@ FirebugReps.Table = domplate(Firebug.Rep,
             {
                 var props = (typeof(prop) == "string") ? prop.split(".") : [prop];
 
-                var value = row;
+                value = row;
                 for (var p in props)
                     value = (value && value[props[p]]) || undefined;
             }
@@ -182,7 +183,7 @@ FirebugReps.Table = domplate(Firebug.Rep,
         {
             Css.removeClass(header, "sortedAscending");
             Css.setClass(header, "sortedDescending");
-            header.setAttribute("aria-sort", "descending")
+            header.setAttribute("aria-sort", "descending");
 
             header.sorted = 1;
 
@@ -194,7 +195,7 @@ FirebugReps.Table = domplate(Firebug.Rep,
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
     // Console logging
 
-    log: function(data, cols, context)
+    log: function(data, cols, context, object)
     {
         // No arguments passed into console.table method, bail out for now,
         // but some error message could be displayed in the future.
@@ -211,7 +212,12 @@ FirebugReps.Table = domplate(Firebug.Rep,
         try
         {
             this.columns = columns;
-            var row = Firebug.Console.log({data: data, columns: columns}, context, "table", this, true);
+
+            var obj = object || {};
+            obj.data = data;
+            obj.columns = columns;
+
+            var row = Firebug.Console.log(obj, context, "table", this, true);
 
             // Set vertical height for scroll bar.
             var tBody = row.querySelector(".dataTableTbody");
@@ -265,7 +271,7 @@ FirebugReps.Table = domplate(Firebug.Rep,
     getHeaderColumns: function(data)
     {
         // Get the first row in the object.
-        var firstRow;
+        var firstRow = null;
         for (var p in data)
         {
             firstRow = data[p];
@@ -301,8 +307,6 @@ FirebugReps.Table = domplate(Firebug.Rep,
      */
     domFilter: function(object, name)
     {
-        var domMembers = Dom.getDOMMembers(object, name);
-
         if (typeof(object) == "function")
         {
             if (Dom.isDOMMember(object, name) && !Firebug.showDOMFuncs)
@@ -322,7 +326,8 @@ FirebugReps.Table = domplate(Firebug.Rep,
 
         return true;
     }
-})};
+});
+};
 
 // ********************************************************************************************* //
 // Registration

@@ -29,61 +29,61 @@ this.initialize = function()
 {
     window.removeEventListener("load", FBTraceFirebugOverlay.initialize, false);
 
-    if (!Firebug.GlobalUI)
+    // Customization of Firebug's menu.
+    var handler = FBTraceFirebugOverlay.onFirebugMenuShowing.bind(FBTraceFirebugOverlay);
+    document.addEventListener("firebugMenuShowing", handler, false);
+};
+
+this.onFirebugMenuShowing = function(event)
+{
+    if (!Firebug.BrowserOverlayLib)
         return;
 
+    var parent = event.detail;
+    var doc = parent.ownerDocument;
+
     // Extend Firebug menu
-    with (Firebug.GlobalUI)
+    with (Firebug.BrowserOverlayLib)
     {
-        // Extend Firebug global menu (more instances exists).
-        var parents = document.getElementsByClassName("fbFirebugMenuPopup");
-        for (var i=0; i<parents.length; i++)
-        {
-            var parent = parents[i];
+        // Open Test Console
+        $menupopupOverlay(doc, parent, [
+            $menuseparator(doc, {
+                insertbefore: "menu_firebug_aboutSeparator",
+            }),
+            $menuitem(doc, {
+                id: "menu_openTraceConsole",
+                label: "Open_Firebug_Tracing",
+                command: "cmd_openTraceConsole",
+                insertbefore: "menu_firebug_aboutSeparator",
+                "class": "fbInternational",
+                key: "key_openTraceConsole"
+            })
+        ]);
 
-            // Open Test Console
-            $menupopupOverlay(parent, [
-                $menuseparator({
-                    insertbefore: "menu_aboutSeparator",
-                }),
-                $menuitem({
-                    id: "menu_openTraceConsole",
-                    label: "Open_Firebug_Tracing",
-                    command: "cmd_openTraceConsole",
-                    insertbefore: "menu_aboutSeparator",
-                    "class": "fbInternational",
-                    key: "key_openTraceConsole"
-                })
-            ]);
-
-            $command("cmd_openTraceConsole", "FBTraceFirebugOverlay.openConsole()");
-            $key("key_openTraceConsole", "r", "shift", "cmd_openTraceConsole");
-
-            // Always Open Test Console (option)
-            var optionsPopup = parent.querySelector("#FirebugMenu_OptionsPopup");
-            $menupopupOverlay(optionsPopup, [
-                $menuitem({
-                    id: "FirebugMenu_Options_alwaysOpenTraceConsole",
-                    type: "checkbox",
-                    label: "Always_Open_Firebug_Tracing",
-                    oncommand: "FBTraceFirebugOverlay.onToggleOption(this)",
-                    insertbefore: "menu_optionsSeparator",
-                    option: "alwaysOpenTraceConsole"
-                })
-            ]);
-        }
+        // Always Open Test Console (option)
+        var optionsPopup = parent.querySelector("#FirebugMenu_OptionsPopup");
+        $menupopupOverlay(doc, optionsPopup, [
+            $menuitem(doc, {
+                id: "FirebugMenu_Options_alwaysOpenTraceConsole",
+                type: "checkbox",
+                label: "Always_Open_Firebug_Tracing",
+                oncommand: "FBTraceFirebugOverlay.onToggleOption(this)",
+                insertbefore: "menu_firebug_optionsSeparator",
+                option: "alwaysOpenTraceConsole"
+            })
+        ]);
     }
 };
 
 this.onToggleOption = function(target)
 {
     var self = this;
-    Firebug.GlobalUI.startFirebug(function()
+    Firebug.browserOverlay.startFirebug(function()
     {
         Firebug.chrome.onToggleOption(target);
 
         // Open automatically if set to "always open", close otherwise.
-        if (Firebug.Options.getPref(Firebug.prefDomain, "alwaysOpenTraceConsole"))
+        if (Firebug.Options.get("alwaysOpenTraceConsole"))
             self.openConsole();
         else
             self.closeConsole();
@@ -96,8 +96,10 @@ this.openConsole = function(prefDomain, windowURL)
         prefDomain = "extensions.firebug";
 
     var consoleWindow = null;
-    FBL.iterateBrowserWindows("FBTraceConsole", function(win) {
-        if (win.TraceConsole && win.TraceConsole.prefDomain == prefDomain) {
+    FBL.iterateBrowserWindows("FBTraceConsole", function(win)
+    {
+        if (win.TraceConsole && win.TraceConsole.prefDomain == prefDomain)
+        {
             consoleWindow = win;
             return true;
         }
@@ -139,8 +141,10 @@ this.closeConsole = function(prefDomain)
         prefDomain = this.prefDomain;
 
     var consoleWindow = null;
-    FBL.iterateBrowserWindows("FBTraceConsole", function(win) {
-        if (win.TraceConsole && win.TraceConsole.prefDomain == prefDomain) {
+    FBL.iterateBrowserWindows("FBTraceConsole", function(win)
+    {
+        if (win.TraceConsole && win.TraceConsole.prefDomain == prefDomain)
+        {
             consoleWindow = win;
             return true;
         }

@@ -9,9 +9,11 @@ define([
     "firebug/lib/css",
     "firebug/chrome/window",
     "firebug/lib/xml",
-    "firebug/lib/options"
+    "firebug/lib/options",
+    "firebug/lib/array",
+    "firebug/editor/editorSelector"
 ],
-function(Obj, Firebug, Xpcom, Events, Url, Css, Win, Xml, Options) {
+function(Obj, Firebug, Xpcom, Events, Url, Css, Win, Xml, Options, Arr, EditorSelector) {
 
 // ********************************************************************************************* //
 // Constants
@@ -26,7 +28,7 @@ const reRepeat = /no-repeat|repeat-x|repeat-y|repeat/;
 // ********************************************************************************************* //
 // CSS Module
 
-Firebug.CSSModule = Obj.extend(Obj.extend(Firebug.Module, Firebug.EditorSelector),
+Firebug.CSSModule = Obj.extend(Firebug.Module, Firebug.EditorSelector,
 {
     dispatchName: "cssModule",
 
@@ -86,15 +88,34 @@ Firebug.CSSModule = Obj.extend(Obj.extend(Firebug.Module, Firebug.EditorSelector
         return insertIndex;
     },
 
-    deleteRule: function(styleSheet, ruleIndex)
+    deleteRule: function(src, ruleIndex)
     {
+        var inlineStyle = (src instanceof window.Element);
         if (FBTrace.DBG_CSS)
-            FBTrace.sysout("deleteRule: " + ruleIndex + " " + styleSheet.cssRules.length,
-                styleSheet.cssRules);
+        {
+            if (inlineStyle)
+            {
+                FBTrace.sysout("deleteRule: element.style", src);
+            }
+            else
+            {
+                FBTrace.sysout("deleteRule: " + ruleIndex + " " + src.cssRules.length,
+                    src.cssRules);
+            }
+        }
 
-        Events.dispatch(this.fbListeners, "onCSSDeleteRule", [styleSheet, ruleIndex]);
+        var rule = (inlineStyle ? src : src.cssRules[ruleIndex]);
+        var afterParams = [src, rule.style.cssText];
+        afterParams.push(inlineStyle ? "" : rule.selectorText);
 
-        styleSheet.deleteRule(ruleIndex);
+        Events.dispatch(this.fbListeners, "onCSSDeleteRule", [src, ruleIndex]);
+
+        if (src instanceof window.Element)
+            src.removeAttribute("style");
+        else
+            src.deleteRule(ruleIndex);
+
+        Events.dispatch(this.fbListeners, "onAfterCSSDeleteRule", afterParams);
     },
 
     setProperty: function(rule, propName, propValue, propPriority)
@@ -140,7 +161,7 @@ Firebug.CSSModule = Obj.extend(Obj.extend(Firebug.Module, Firebug.EditorSelector
     },
 
     /**
-     * Method for atomic propertly removal, such as through the context menu.
+     * Method for atomic property removal, such as through the context menu.
      */
     deleteProperty: function(rule, propName, context)
     {
@@ -171,10 +192,27 @@ Firebug.CSSModule = Obj.extend(Obj.extend(Firebug.Module, Firebug.EditorSelector
         Events.dispatch(this.fbListeners, "onEndFirebugChange", [rule, context]);
     },
 
+    /**
+     * Get a document's temporary stylesheet for storage of user-provided rules.
+     * If it doesn't exist yet, create it.
+     */
+    getDefaultStyleSheet: function(doc)
+    {
+        // Cache the temporary sheet on an expando of the document.
+        var sheet = doc.fbDefaultSheet;
+        if (!sheet)
+        {
+            sheet = Css.appendStylesheet(doc, "chrome://firebug/default-stylesheet.css").sheet;
+            sheet.defaultStylesheet = true;
+            doc.fbDefaultSheet = sheet;
+        }
+        return sheet;
+    },
+
     cleanupSheets: function(doc, context)
     {
         if (!context)
-            return;
+            return false;
 
         // Due to the manner in which the layout engine handles multiple
         // references to the same sheet we need to kick it a little bit.
@@ -188,7 +226,7 @@ Firebug.CSSModule = Obj.extend(Obj.extend(Firebug.Module, Firebug.EditorSelector
         /*if (!Xml.isXMLPrettyPrint(context))
         {
             var style = Css.createStyleSheet(doc);
-            style.innerHTML = "#fbIgnoreStyleDO_NOT_USE {}";
+            style.textContent = "#fbIgnoreStyleDO_NOT_USE {}";
             Css.addStyleSheet(doc, style);
 
             if (style.parentNode)
@@ -201,6 +239,8 @@ Firebug.CSSModule = Obj.extend(Obj.extend(Firebug.Module, Firebug.EditorSelector
                     FBTrace.sysout("css.cleanupSheets; ERROR no parent style:", style);
             }
         }*/
+
+        var result = true;
 
         // https://bugzilla.mozilla.org/show_bug.cgi?id=500365
         // This voodoo touches each style sheet to force some Firefox internal change
@@ -220,22 +260,46 @@ Firebug.CSSModule = Obj.extend(Obj.extend(Firebug.Module, Firebug.EditorSelector
             }
             catch(e)
             {
+                result = false;
+
                 if (FBTrace.DBG_ERRORS)
-                    FBTrace.sysout("css.show: sheet.cssRules FAILS for "+
-                        (styleSheets[i]?styleSheets[i].href:"null sheet")+e, e);
+                    FBTrace.sysout("css.show: sheet.cssRules FAILS for " +
+                        (styleSheets[i] ? styleSheets[i].href : "null sheet") + e, e);
             }
         }
+
+        // Return true only if all stylesheets are fully loaded and there is no
+        // excpetion when accessing them.
+        return result;
     },
 
-    cleanupSheetHandler: function(event, context)
+    cleanupSheetHandler: function(context, records)
     {
-        var target = event.target,
-            tagName = (target.tagName || "").toLowerCase();
-
-        if (tagName == "link")
+        var shouldHandle = false;
+        records.forEach(function(record)
         {
-            this.cleanupSheets(target.ownerDocument, context);
-        }
+            if (record.type === "attributes")
+            {
+                if (record.target.tagName.toUpperCase() === "LINK")
+                    shouldHandle = true;
+            }
+            else
+            {
+                var nodes = record.addedNodes, len = nodes.length;
+                for (var i = 0; i < len; ++i)
+                {
+                    if (nodes[i].nodeType === 1 && // Node.ELEMENT_NODE
+                        nodes[i].tagName.toUpperCase() === "LINK")
+                    {
+                        shouldHandle = true;
+                        break;
+                    }
+                }
+            }
+        });
+
+        if (shouldHandle)
+            this.cleanupSheets(records[0].target.ownerDocument, context);
     },
 
     parseCSSValue: function(value, offset)
@@ -442,21 +506,39 @@ Firebug.CSSModule = Obj.extend(Obj.extend(Firebug.Module, Firebug.EditorSelector
 
     watchWindow: function(context, win)
     {
-        var doc = win.document;
-        this.cleanupSheetListener= Obj.bind(this.cleanupSheetHandler, this, context);
+        if (!context.sheetCleaners)
+        {
+            context.sheetCleaners = {
+                handler: this.cleanupSheetHandler.bind(this, context),
+                observers: new WeakMap()
+            };
+        }
 
-        context.addEventListener(doc, "DOMAttrModified", this.cleanupSheetListener, false);
-        context.addEventListener(doc, "DOMNodeInserted", this.cleanupSheetListener, false);
+        var cleaners = context.sheetCleaners;
+        if (!cleaners.observers.has(win))
+        {
+            // XXXsimon: Maybe we should restrict ourselves to just
+            // document.head, non-recursively? It is probably possible to do
+            // this without mutation observers at all, too.
+            var observer = new MutationObserver(cleaners.handler);
+            cleaners.observers.set(win, observer);
+            observer.observe(win.document, {
+                childList: true,
+                attributes: true,
+                attributeFilter: ["disabled", "href", "media", "type", "rel"],
+                subtree: true
+            });
+        }
     },
 
     unwatchWindow: function(context, win)
     {
-        var doc = win.document;
-
-        if (this.cleanupSheetListener)
+        var cleaners = context.sheetCleaners;
+        if (cleaners && cleaners.observers.has(win))
         {
-            context.removeEventListener(doc, "DOMAttrModified", this.cleanupSheetListener, false);
-            context.removeEventListener(doc, "DOMNodeInserted", this.cleanupSheetListener, false);
+            var observer = cleaners.observers.get(win);
+            cleaners.observers.delete(win);
+            observer.disconnect();
         }
     },
 

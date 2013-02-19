@@ -21,11 +21,11 @@ define([
     "firebug/lib/array",
     "firebug/lib/dom",
     "firebug/lib/http",
-    "firebug/js/fbs",
     "firebug/trace/traceListener",
+    "firebug/console/commandLineExposed",
 ],
 function(FBL, Obj, Firefox, ChromeFactory, Domplate, Options, Locale, Events,
-    Wrapper, Url, Css, Win, Str, Arr, Dom, Http, FBS, TraceListener) {
+    Wrapper, Url, Css, Win, Str, Arr, Dom, Http, TraceListener, CommandLineExposed) {
 
 // ********************************************************************************************* //
 // Constants
@@ -42,18 +42,6 @@ const promptService = Cc["@mozilla.org/embedcomp/prompt-service;1"].getService(C
 const versionURL = "chrome://firebug/content/branch.properties";
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
-const firebugURLs =  // TODO chrome.js
-{
-    main: "http://www.getfirebug.com",
-    FAQ: "http://getfirebug.com/wiki/index.php/FAQ",
-    docs: "http://www.getfirebug.com/docs.html",
-    keyboard: "http://getfirebug.com/wiki/index.php/Keyboard_and_Mouse_Shortcuts",
-    discuss: "http://groups.google.com/group/firebug",
-    issues: "http://code.google.com/p/fbug/issues/list",
-    donate: "http://getfirebug.com/getinvolved",
-    issue5110: "http://code.google.com/p/fbug/issues/detail?id=5110"
-};
 
 const scriptBlockSize = 20;
 
@@ -75,20 +63,9 @@ var defaultFuncRep = null;
 var menuItemControllers = [];
 var panelTypeMap = {};
 
-// * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
-try
-{
-    // Register default Firebug string bundle (yet before domplate templates).
-    Locale.registerStringBundle("chrome://firebug/locale/firebug.properties");
-}
-catch (exc)
-{
-    dump("Register default string bundle FAILS: "+exc+"\n");
-}
-
 // ********************************************************************************************* //
 
+//xxxHonza: we should use the existing Firebug object.
 if (window.Firebug)
 {
     // Stow the pre-load properties, add them back at the end
@@ -106,7 +83,7 @@ if (window.Firebug)
  */
 window.Firebug =
 {
-    version: "1.10",
+    version: "1.12",
 
     dispatchName: "Firebug",
     modules: modules,
@@ -171,11 +148,14 @@ window.Firebug =
         // Append early registered panels at the end.
         panelTypes.push.apply(panelTypes, tempPanelTypes);
 
-        Firebug.Options.addListener(this);
+        // Firebug is getting option-updates from the connection so,
+        // do not register it again here (see issue 6035)
+        //Firebug.Options.addListener(this);
 
         this.isInitialized = true;
 
-        Events.dispatch(modules, "initialize", []);
+        // Distribute Firebug's preference domain as an argument (see issue 6210).
+        Events.dispatch(modules, "initialize", [Options.prefDomain]);
 
         // This is the final of Firebug initialization.
         FBTrace.timeEnd("INITIALIZATION_TIME");
@@ -277,10 +257,6 @@ window.Firebug =
         if (Firebug.PanelActivation)
             Firebug.PanelActivation.activatePanelTypes(panelTypes);
 
-        // bug712289
-        if (Firebug.PanelActivation && !FBS.isJSDAvailable())
-            Firebug.PanelActivation.disablePanel(this.getPanelType("script"));
-
         // Tell the modules the UI is up.
         Events.dispatch(modules, "initializeUI", [detachArgs]);
     },
@@ -323,7 +299,7 @@ window.Firebug =
 
     shutdownUI: function()  // TODO chrome.js
     {
-        window.removeEventListener('unload', shutdownFirebug, false);
+        window.removeEventListener("unload", shutdownFirebug, false);
 
         Events.dispatch(modules, "disable", [Firebug.chrome]);
     },
@@ -377,7 +353,7 @@ window.Firebug =
     // dispatch suspendFirebug to all windows
     suspend: function()
     {
-        if(Firebug.rerun)
+        if (Firebug.rerun)
             return;
 
         Firebug.suspendFirebug();
@@ -421,23 +397,29 @@ window.Firebug =
         var contextURLSet = [];
 
         // create a list of all unique activeContexts
-        Firebug.connection.eachContext( function createActiveContextList(context)
+        Firebug.connection.eachContext(function createActiveContextList(context)
         {
             if (FBTrace.DBG_WINDOWS)
-                FBTrace.sysout("context "+context.getName());
+                FBTrace.sysout("context " + context.getName());
 
             try
             {
                 var cw = context.window;
                 if (cw)
                 {
+                    var url;
                     if (cw.closed)
+                    {
                         url = "about:closed";
+                    }
                     else
-                        if ('location' in cw)
-                            var url = cw.location.toString();
+                    {
+                        if ("location" in cw)
+                            url = cw.location.toString();
                         else
-                            var url = context.getName();
+                            url = context.getName();
+                    }
+
                     if (url)
                     {
                         if (contextURLSet.indexOf(url) == -1)
@@ -520,6 +502,20 @@ window.Firebug =
 
     registerPanel: function()
     {
+        for (var i=0; i<arguments.length; ++i)
+        {
+            var panelName = arguments[i].prototype.name;
+            var panel = panelTypeMap[panelName];
+            if (panel)
+            {
+                if (FBTrace.DBG_ERRORS)
+                {
+                    FBTrace.sysout("firebug.registerPanel; ERROR a panel with the same " +
+                        "ID already registered! " + panelName);
+                }
+            }
+        }
+
         // In order to keep built in panels (like Console, Script...) be the first one
         // and insert all panels coming from extension at the end, catch any early registered
         // panel (i.e. before FBL.initialize is called, such as YSlow) in a temp array
@@ -529,13 +525,13 @@ window.Firebug =
         else
             panelTypes.push.apply(panelTypes, arguments);
 
-        for (var i = 0; i < arguments.length; ++i)
+        for (var i=0; i<arguments.length; ++i)
             panelTypeMap[arguments[i].prototype.name] = arguments[i];
 
         if (FBTrace.DBG_REGISTRATION)
         {
-            for (var i = 0; i < arguments.length; ++i)
-                FBTrace.sysout("registerPanel "+arguments[i].prototype.name);
+            for (var i=0; i<arguments.length; ++i)
+                FBTrace.sysout("registerPanel " + arguments[i].prototype.name);
         }
 
         // If Firebug is not initialized yet the UI will be updated automatically soon.
@@ -667,6 +663,16 @@ window.Firebug =
             Firebug.TraceModule.removeListener(listener);
     },
 
+    registerCommand: function(name, config)
+    {
+        return CommandLineExposed.registerCommand(name, config);
+    },
+
+    unregistereCommand: function(name)
+    {
+        return CommandLineExposed.unregisterCommand(name);
+    },
+
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
     // Options
 
@@ -742,7 +748,7 @@ window.Firebug =
 
         Firebug.chrome.toggleOpen(show);
 
-        if(!show)
+        if (!show)
             Firebug.Inspector.inspectNode(null);
 
         //xxxHonza: should be removed.
@@ -788,29 +794,56 @@ window.Firebug =
     {
         if (panelName)
             Firebug.chrome.selectPanel(panelName);
-
-        var webApp = Firebug.connection.getCurrentSelectedWebApp();
-        var context = Firebug.connection.getContextByWebApp(webApp);
-        if (!context)  // then we are not debugging the selected tab
+        // if is deactivated.
+        if (!Firebug.currentContext)
         {
-            context = Firebug.connection.getOrCreateContextByWebApp(webApp);
-            forceOpen = true;  // Be sure the UI is open for a newly created context
-        }
-        else  // we were debugging
-        {
-
+            var context = Firebug.getContext();
+            // Be sure the UI is open for a newly created context.
+            forceOpen = true;
         }
 
-        if (Firebug.isDetached()) // if we are out of the browser focus the window
-            Firebug.chrome.focus();
-        else if (Firebug.framePosition == "detached")
-            this.detachBar();
-        else if (Firebug.isMinimized()) // toggle minimize
-            Firebug.unMinimize();
-        else if (!forceOpen)  // else isInBrowser
+        if (Firebug.isDetached())
+        {
+            //in detached mode, two possibilities exist, the firebug windows is 
+            // the active window of the user or no.
+            if ( !Firebug.chrome.hasFocus() || forceOpen)
+                Firebug.chrome.focus();
+            else
+                Firebug.minimizeBar();
+        }
+        // toggle minimize
+        else if (Firebug.isMinimized())
+        {
+            // be careful, unMinimize func always sets placement to
+            // inbrowser first then unminimizes. when we want to
+            // unminimize in detached mode must call detachBar func.
+            if (Firebug.framePosition == "detached")
+                this.detachBar();
+            else
+                Firebug.unMinimize();
+        }
+        // else isInBrowser
+        else if (!forceOpen)
+        {
             Firebug.minimizeBar();
+        }
 
         return true;
+    },
+
+    /**
+     * Get context for the current website
+     */
+    getContext: function()
+    {
+        var webApp = Firebug.connection.getCurrentSelectedWebApp();
+        var context = Firebug.connection.getContextByWebApp(webApp);
+        // we are not debugging the selected tab.
+        if (!context)
+        {
+            context = Firebug.connection.getOrCreateContextByWebApp(webApp);
+        }
+        return context;
     },
 
     /**
@@ -839,10 +872,20 @@ window.Firebug =
 
     minimizeBar: function()  // just pull down the UI, but don't deactivate the context
     {
-        if (Firebug.isDetached())  // TODO disable minimize on externalMode
+        if (Firebug.isDetached())
         {
             // TODO reattach
-            Firebug.toggleDetachBar(false, false);
+
+            // window is closing in detached mode
+            var parent = this.getFirebugFrameParent();
+            if (parent)
+            {
+                parent.exportFirebug();
+                parent.close();
+            }
+
+            Firebug.setPlacement("minimized");
+            this.showBar(false);
             Firebug.chrome.focus();
         }
         else // inBrowser -> minimized
@@ -869,21 +912,45 @@ window.Firebug =
         return true;
     },
 
-    // detached -> closed; inBrowser -> detached TODO reattach
+    /**
+     * function to switch between detached and inbrowser modes.
+     * @param forceOpen: should not be closed, stay open if open or open it.
+     * @param reopenInBrowser: switch from detahced to inbrowser mode.
+     */
     toggleDetachBar: function(forceOpen, reopenInBrowser)
     {
-        if (!forceOpen && Firebug.isDetached())  // detached -> minimized
+        //detached -> inbrowser
+        if (!forceOpen && Firebug.isDetached())
         {
-            var topWin = Firebug.chrome.window.top;
-            topWin.exportFirebug();
-            topWin.close();
+            var parent = this.getFirebugFrameParent();
+            parent.exportFirebug();
+            parent.close();
 
             if (reopenInBrowser)
+            {
+                // Is Firebug deactivated ? if yes, should be
+                // activated at first, then unminimize.
+                if (!Firebug.currentContext)
+                {
+                    var context = Firebug.getContext();
+                }
                 Firebug.unMinimize();
+            }
             else
+            {
                 Firebug.minimizeBar();
+            }
+
             Firebug.chrome.syncPositionPref();
         }
+        // is minimized now but the last time that has been closed, was in detached mode,
+        // so it should be returned to in browser mode because the user has pressed CTRL+F12.
+        else if (Firebug.framePosition == "detached" && Firebug.isMinimized())
+        {
+            Firebug.unMinimize();
+            Firebug.chrome.syncPositionPref();
+        }
+        // else is in browser mode, then switch to detached mode.
         else
         {
             this.detachBar();
@@ -902,7 +969,6 @@ window.Firebug =
         Firebug.StartButton.resetTooltip();
     },
 
-
     detachBar: function()
     {
         if (Firebug.isDetached())  // can be set true attachBrowser
@@ -911,10 +977,10 @@ window.Firebug =
             return null;
         }
 
-        if(Firebug.chrome.waitingForDetach)
+        if (Firebug.chrome.waitingForDetach)
             return null;
-        Firebug.chrome.waitingForDetach = true;
 
+        Firebug.chrome.waitingForDetach = true;
         Firebug.chrome.toggleOpen(false);  // don't show in browser.xul now
 
         if (FBTrace.DBG_ACTIVATION)
@@ -942,6 +1008,22 @@ window.Firebug =
     toggleCommandLine: function(showCommandEditor)
     {
         Options.set("commandEditor", showCommandEditor);
+    },
+
+    // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+    /**
+     * Returns parent of the firebugFrame.xul frame. The actual parent depends on whether
+     * Firebug is attached or detached.
+     *
+     * attached -> browser.xul
+     * detached -> firebug.xul
+     */
+    getFirebugFrameParent: function()
+    {
+        // We need firebug.xul in case of detached state. So, don't use 'top' since
+        // it references browser.xul
+        return Firebug.chrome.window.parent;
     },
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
@@ -1062,6 +1144,22 @@ window.Firebug =
     },
 
     /**
+     * Returns all panel types, whose activation can be toggled
+     * @returns {Object} Activable panel types
+     */
+    getActivablePanelTypes: function()
+    {
+        var activablePanelTypes = [];
+        for (var i = 0; i < panelTypes.length; ++i)
+        {
+            if (this.PanelActivation.isPanelActivable(panelTypes[i]))
+                activablePanelTypes.push(panelTypes[i]);
+        }
+
+        return activablePanelTypes;
+    },
+
+    /**
      * Gets an object containing the state of the panel from the last time
      * it was displayed before one or more page reloads.
      * The 'null' return here is a too-subtle signal to the panel code in bindings.xml.
@@ -1105,6 +1203,13 @@ window.Firebug =
             if (panel[fName])
                 return panel[fName].apply(panel,args);
         });
+    },
+
+    // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
+
+    dispatch: function(listeners, eventId, args)
+    {
+        Events.dispatch(listeners, eventId, args);
     },
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
@@ -1166,7 +1271,7 @@ window.Firebug =
             if (Css.hasClass(child, "repTarget"))
                 target = child;
 
-            if (child.repObject)
+            if (child.repObject != null)
             {
                 if (!target && Css.hasClass(child, "repIgnore"))
                     break;
@@ -1183,7 +1288,7 @@ window.Firebug =
     {
         for (var child = node; child; child = child.parentNode)
         {
-            if (child.repObject)
+            if (child.repObject != null)
                 return child;
         }
     },
@@ -1192,7 +1297,7 @@ window.Firebug =
     {
         for (var child = element.firstChild; child; child = child.nextSibling)
         {
-            if (child.repObject == object)
+            if (child.repObject === object)
                 return child;
         }
     },
@@ -1210,11 +1315,6 @@ window.Firebug =
     },
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
-
-    visitWebsite: function(which)
-    {
-        Win.openNewTab(firebugURLs[which]);
-    },
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
     // nsISupports
@@ -1287,7 +1387,7 @@ window.Firebug =
         if (!Firebug.previousPlacement)
             Firebug.previousPlacement = Options.get("previousPlacement");
 
-        return (Firebug.previousPlacement && (Firebug.previousPlacement == PLACEMENT_MINIMIZED) )
+        return (Firebug.previousPlacement && (Firebug.previousPlacement == PLACEMENT_MINIMIZED) );
     },
 
     // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //
@@ -1345,6 +1445,10 @@ Firebug.getConsoleByGlobal = function getConsoleByGlobal(global)
         if (context)
         {
             var handler = Firebug.Console.injector.getConsoleHandler(context, global);
+
+            if (!handler)
+                handler = Firebug.Console.isReadyElsePreparing(context, global);;
+
             if (handler)
             {
                 FBTrace.sysout("Firebug.getConsoleByGlobal " + handler.console + " for " +
@@ -1357,17 +1461,19 @@ Firebug.getConsoleByGlobal = function getConsoleByGlobal(global)
                 FBTrace.sysout("Firebug.getConsoleByGlobal FAILS, no handler for global " +
                     global + " " + Win.safeGetWindowLocation(global), global);
         }
-
-        if (FBTrace.DBG_ERRORS)
-            FBTrace.sysout("Firebug.getConsoleByGlobal FAILS, no context for global " +
-                global, global);
+        else
+        {
+            if (FBTrace.DBG_ERRORS)
+                FBTrace.sysout("Firebug.getConsoleByGlobal FAILS, no context for global " +
+                    global, global);
+        }
     }
-    catch(exc)
+    catch (exc)
     {
-        if(FBTrace.DBG_ERRORS)
+        if (FBTrace.DBG_ERRORS)
             FBTrace.sysout("Firebug.getConsoleByGlobal FAILS " + exc, exc);
     }
-}
+};
 
 // ********************************************************************************************* //
 
@@ -1384,7 +1490,8 @@ Firebug.Listener = function()
     // It can't be created here since derived objects would share
     // the same array.
     this.fbListeners = null;
-}
+};
+
 Firebug.Listener.prototype =
 {
     addListener: function(listener)
@@ -1644,9 +1751,11 @@ Firebug.Panel = Obj.extend(new Firebug.Listener(),
 
         if (this.panelNode)
         {
+            var scrollTop = this.panelNode.scrollTop;
             this.panelNode = doc.adoptNode(this.panelNode, true);
             this.panelNode.ownerPanel = this;
             doc.body.appendChild(this.panelNode);
+            this.panelNode.scrollTop = scrollTop;
         }
     },
 
@@ -1929,19 +2038,21 @@ Firebug.Panel = Obj.extend(new Firebug.Listener(),
         // to simply generate the sorted list within the module, rather than
         // sorting within the UI.
         var self = this;
-        function compare(a, b) {
+        function compare(a, b)
+        {
             var locA = self.getObjectDescription(a);
             var locB = self.getObjectDescription(b);
-            if(locA.path > locB.path)
+            if (locA.path > locB.path)
                 return 1;
-            if(locA.path < locB.path)
+            if (locA.path < locB.path)
                 return -1;
-            if(locA.name > locB.name)
+            if (locA.name > locB.name)
                 return 1;
-            if(locA.name < locB.name)
+            if (locA.name < locB.name)
                 return -1;
             return 0;
         }
+
         var allLocs = this.getLocationList().sort(compare);
         for (var curPos = 0; curPos < allLocs.length && allLocs[curPos] != this.location; curPos++);
 
@@ -2409,14 +2520,31 @@ Firebug.Rep = domplate(
 
     getTitle: function(object)
     {
-        if (object.constructor && typeof(object.constructor) == 'function')
+        if (!object)
         {
-            var ctorName = object.constructor.name;
-            if (ctorName && ctorName != "Object")
-                return ctorName;
+            if (FBTrace.DBG_ERRORS)
+                FBTrace.sysout("Rep.getTitle; ERROR No object provided");
+            return "null object";
         }
 
-        var label = FBL.safeToString(object); // eg [object XPCWrappedNative [object foo]]
+        try
+        {
+            if (object.constructor && typeof(object.constructor) == 'function')
+            {
+                var ctorName = object.constructor.name;
+                // xxxsz: Objects with 'Object' as constructor name should also be shown.
+                // See issue 6148.
+                if (ctorName)
+                    return ctorName;
+            }
+        }
+        catch (e)
+        {
+            if (FBTrace.DBG_ERRORS)
+                FBTrace.sysout("Rep.getTitle; EXCEPTION " + e, e);
+        }
+
+        var label = Str.safeToString(object); // eg [object XPCWrappedNative [object foo]]
 
         const re =/\[object ([^\]]*)/;
         var m = re.exec(label);
@@ -2428,6 +2556,11 @@ Firebug.Rep = domplate(
             return n[1];  // eg foo
         else
             return m ? m[1] : label;
+    },
+
+    showInfoTip: function(infoTip, target, x, y)
+    {
+        return false;
     },
 
     getTooltip: function(object)
@@ -2477,7 +2610,8 @@ Firebug.Rep = domplate(
     {
         return n == 1 ? "" : "s";
     }
-})};
+});
+};
 
 // ********************************************************************************************* //
 
@@ -2618,9 +2752,8 @@ Firebug.Migrator =
     {
         var id = elt.getAttribute('id');
         Options.set( "migrated_"+id, true, typeof(true));
-    },
-
-}
+    }
+};
 
 // ********************************************************************************************* //
 

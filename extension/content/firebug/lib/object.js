@@ -8,6 +8,9 @@ define([
 function(FBTrace, Arr, Str) {
 
 // ********************************************************************************************* //
+// Constants
+
+var Cu = Components.utils;
 
 var Obj = {};
 
@@ -16,28 +19,30 @@ var Obj = {};
 Obj.bind = function()  // fn, thisObject, args => thisObject.fn(arguments, args);
 {
    var args = Arr.cloneArray(arguments), fn = args.shift(), object = args.shift();
-   return function bind() { return fn.apply(object, Arr.arrayInsert(Arr.cloneArray(args), 0, arguments)); }
+   return function bind() { return fn.apply(object, Arr.arrayInsert(Arr.cloneArray(args), 0, arguments)); };
 };
 
 Obj.bindFixed = function() // fn, thisObject, args => thisObject.fn(args);
 {
     var args = Arr.cloneArray(arguments), fn = args.shift(), object = args.shift();
-    return function() { return fn.apply(object, args); }
+    return function() { return fn.apply(object, args); };
 };
 
-Obj.extend = function(l, r)
+Obj.extend = function()
 {
-    if (!l || !r)
+    if (arguments.length < 2)
     {
-        FBTrace.sysout("object.extend; ERROR", [l, r]);
+        FBTrace.sysout("object.extend; ERROR", arguments);
         throw new Error("Obj.extend on undefined object");
     }
 
     var newOb = {};
-    for (var n in l)
-        newOb[n] = l[n];
-    for (var n in r)
-        newOb[n] = r[n];
+    for (var i = 0, len = arguments.length; i < len; ++i)
+    {
+        for (var prop in arguments[i])
+            newOb[prop] = arguments[i][prop];
+    }
+
     return newOb;
 };
 
@@ -67,31 +72,29 @@ Obj.hasProperties = function(ob, nonEnumProps, ownPropsOnly)
         if (!ob)
             return false;
 
-        var obString = Str.safeToString(ob);
-        if (obString === "[object StorageList]" ||
-            obString === "[xpconnect wrapped native prototype]")
+        try
         {
-            return true;
+            // This is probably unnecessary in Firefox 19 or so.
+            if ("toString" in ob && ob.toString() === "[xpconnect wrapped native prototype]")
+                return true;
         }
+        catch (exc) {}
 
         // The default case (both options false) is relatively simple.
         // Just use for..in loop.
         if (!nonEnumProps && !ownPropsOnly)
         {
             for (var name in ob)
-            {
-                // Try to access the property before declaring existing properties.
-                // It's because some properties can't be read see:
-                // issue 3843, https://bugzilla.mozilla.org/show_bug.cgi?id=455013
-                var value = ob[name];
                 return true;
-            }
             return false;
         }
 
         var type = typeof(ob);
         if (type == "string" && ob.length)
             return true;
+         
+        if (type === "number" || type === "boolean" || type === "undefined" || ob === null)
+            return false;
 
         if (nonEnumProps)
             props = Object.getOwnPropertyNames(ob);
@@ -99,20 +102,13 @@ Obj.hasProperties = function(ob, nonEnumProps, ownPropsOnly)
             props = Object.keys(ob);
 
         if (props.length)
-        {
-            // Try to access the property before declaring existing properties.
-            // It's because some properties can't be read see:
-            // issue 3843, https://bugzilla.mozilla.org/show_bug.cgi?id=455013
-            var value = ob[props[0]];
             return true;
-        }
 
         // Not interested in inherited properties, bail out.
         if (ownPropsOnly)
             return false;
 
         // Climb prototype chain.
-        var inheritedProps = [];
         var parent = Object.getPrototypeOf(ob);
         if (parent)
             return this.hasProperties(parent, nonEnumProps, ownPropsOnly);
@@ -147,12 +143,12 @@ Obj.getPrototype = function(ob)
 Obj.getUniqueId = function()
 {
     return this.getRandomInt(0,65536);
-}
+};
 
 Obj.getRandomInt = function(min, max)
 {
     return Math.floor(Math.random() * (max - min + 1) + min);
-}
+};
 
 // Cross Window instanceof; type is local to this window
 Obj.XW_instanceof = function(obj, type)
@@ -181,12 +177,13 @@ Obj.XW_instanceof = function(obj, type)
 
     // https://developer.mozilla.org/en/Core_JavaScript_1.5_Guide/Property_Inheritance_Revisited
     // /Determining_Instance_Relationships
-}
+};
 
 /**
  * Tells if the given property of the provided object is a non-native getter or not.
  * This method depends on PropertyPanel.jsm module available in Firefox 5+
  * isNonNativeGetter has been introduced in Firefox 7
+ * The method has been moved to WebConsoleUtils.jsm in Fx 18
  *
  * @param object aObject The object that contains the property.
  * @param string aProp The property you want to check if it is a getter or not.
@@ -197,20 +194,34 @@ Obj.isNonNativeGetter = function(obj, propName)
     try
     {
         var scope = {};
-        Components.utils.import("resource:///modules/PropertyPanel.jsm", scope);
+        Cu.import("resource://gre/modules/devtools/WebConsoleUtils.jsm", scope);
 
-        if (scope.isNonNativeGetter)
+        if (scope.WebConsoleUtils.isNonNativeGetter)
         {
-            Obj.isNonNativeGetter = scope.isNonNativeGetter;
+            Obj.isNonNativeGetter = function(obj, propName)
+            {
+                return scope.WebConsoleUtils.isNonNativeGetter(obj, propName);
+            };
+
             return Obj.isNonNativeGetter(obj, propName);
         }
     }
     catch (err)
     {
+        if (FBTrace.DBG_ERRORS)
+            FBTrace.sysout("Obj.isNonNativeGetter; EXCEPTION " + err, err);
     }
 
+    // OK, the method isn't available let's use an empty implementation
+    Obj.isNonNativeGetter = function()
+    {
+        if (FBTrace.DBG_ERRORS)
+            FBTrace.sysout("Obj.isNonNativeGetter; ERROR built-in method not found!");
+        return true;
+    };
+
     return true;
-}
+};
 
 // ********************************************************************************************* //
 

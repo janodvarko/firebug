@@ -44,15 +44,16 @@ this.ok = function(pass, msg)
 };
 
 /**
- * Verification method. Compares expected and actuall string (typially from the Firebug UI).
- * If "actuall" and "expected" parameters are equal the test passes, otherwise fails.
+ * Verification method. Compares expected and actual string (typically from the Firebug UI).
+ * If "actual" and "expected" parameters are equal, the test passes, otherwise it fails.
  *  
  * @param {String} expected Expected value
  * @param {String} actual Actual value
  * @param {String} msg A message to be displayed as a test result under the current test
  *      within the test console.
+ * @param {String} shouldNotMatch Specifies whether expected and actual should not match
  */
-this.compare = function(expected, actual, msg)
+this.compare = function(expected, actual, msg, shouldNotMatch)
 {
     var result;
     if (expected instanceof RegExp)
@@ -66,10 +67,22 @@ this.compare = function(expected, actual, msg)
         result = (expected == actual);
     }
 
-    FBTest.sysout("compare "+(result?"passes":"**** FAILS ****")+" "+msg, {expected: expected, actual: actual});
+    if (shouldNotMatch)
+        result = !result;
+
+    FBTest.sysout("compare "+(result?"passes":"**** FAILS ****")+" "+msg,
+        {expected: expected, actual: actual});
+
+    var shownMsg = msg;
+    if (!result)
+    {
+        shownMsg += " (was: " + actual + ", expected" +
+            (shouldNotMatch ? " otherwise" : ": " + expected) +
+            (typeof actual === typeof expected ? ")" : " - different types)");
+    }
 
     FBTestApp.TestRunner.appendResult(new FBTestApp.TestResult(window,
-        result, msg, expected, actual));
+        result, shownMsg, expected, actual));
 
     if (result)
         FBTest.resetTimeout();
@@ -259,29 +272,29 @@ this.manualVerify = function(verifyMsg, instructions)
 // ********************************************************************************************* //
 // Event automation
 
-this.click = function(node)
+this.click = function(node, win)
 {
-    this.sendMouseEvent({type: "click"}, node);
+    this.sendMouseEvent({type: "click"}, node, win);
 };
 
-this.dblclick = function(node)
+this.dblclick = function(node, win)
 {
-    this.sendMouseEvent({type: "click", detail: 2}, node);
+    this.sendMouseEvent({type: "click", detail: 2}, node, win);
 };
 
-this.rightClick = function(node)
+this.rightClick = function(node, win)
 {
-    this.sendMouseEvent({type: "click", button: 2}, node);
+    this.sendMouseEvent({type: "click", button: 2}, node, win);
 };
 
-this.mouseDown = function(node)
+this.mouseDown = function(node, win)
 {
-    this.sendMouseEvent({type: "mousedown"}, node);
+    this.sendMouseEvent({type: "mousedown"}, node, win);
 };
 
-this.mouseUp = function(node)
+this.mouseUp = function(node, win)
 {
-    this.sendMouseEvent({type: "mouseup"}, node);
+    this.sendMouseEvent({type: "mouseup"}, node, win);
 };
 
 this.mouseOver = function(node, offsetX, offsetY)
@@ -292,10 +305,21 @@ this.mouseOver = function(node, offsetX, offsetY)
     this.synthesizeMouse(node, offsetX, offsetY, eventDetails, win);
 };
 
+this.mouseMove = function(node, offsetX, offsetY)
+{
+    var win = node.ownerDocument.defaultView;
+
+    var eventDetails = {type: "mousemove"};
+    this.synthesizeMouse(node, offsetX, offsetY, eventDetails, win);
+};
+
 this.sendMouseEvent = function(event, target, win)
 {
     if (!target)
-        FBTrace.sysout("sendMouseEvent target is null");
+    {
+        FBTest.progress("sendMouseEvent target is null");
+        return;
+    }
 
     var targetIsString = typeof target == "string";
  
@@ -393,6 +417,10 @@ this.synthesizeMouse = function(node, offsetX, offsetY, event, win)
 
     // Use the first client rect for clicking (e.g. SPAN can have more).
     var rect = rectCollection[0]; //node.getBoundingClientRect();
+
+    if (!FBTest.ok(rect, "Mouse event must be synthesized"))
+        return;
+
     var frameOffset = getFrameOffset(node);
 
     FBTest.sysout("frameOffset " + frameOffset);
@@ -407,6 +435,37 @@ this.synthesizeMouse = function(node, offsetX, offsetY, event, win)
     offsetY += frameOffset.top;
 
     synthesizeMouse(node, offsetX, offsetY, event, win);
+};
+
+this.getStringDataFromClipboard = function()
+{
+    // https://developer.mozilla.org/en-US/docs/Using_the_Clipboard
+    var clip = Components.classes["@mozilla.org/widget/clipboard;1"].getService(Components.interfaces.nsIClipboard);
+    if (!clip)
+        return false;
+
+    var trans = Components.classes["@mozilla.org/widget/transferable;1"].createInstance(Components.interfaces.nsITransferable);
+    if (!trans)
+        return false;
+    if ('init' in trans)
+        trans.init(null);
+    trans.addDataFlavor("text/unicode");
+
+    clip.getData(trans, clip.kGlobalClipboard);
+
+    var str       = new Object();
+    var strLength = new Object();
+
+    trans.getTransferData("text/unicode", str, strLength);
+
+    if (str)
+    {
+        str = str.value.QueryInterface(Components.interfaces.nsISupportsString);
+        pastetext = str.data.substring(0, strLength.value / 2);
+        return pastetext;
+    }
+
+    return false;
 };
 
 function getFrameOffset(win)
@@ -473,7 +532,7 @@ this.pressKey = function(keyCode, target)
         
         return null;
     }
-    
+
     FBTrace.sysout("DEPRECATE WARNING: FBTest.pressKey() should not be used. Use FBTest.sendKey() instead.");
     return this.sendKey(getKeyName(keyCode), target);
 };
@@ -485,13 +544,22 @@ this.pressKey = function(keyCode, target)
  * Open/close Firebug UI. If forceOpen is true, Firebug is only opened if closed.
  * @param {Boolean} forceOpen Set to true if Firebug should stay opened.
  */
-this.pressToggleFirebug = function(forceOpen)
+this.pressToggleFirebug = function(forceOpen, target)
 {
-    // Don't close if it's open and should stay open.
-    if (forceOpen && this.isFirebugOpen())
-        return;
+    var isOpen = this.isFirebugOpen();
+    FBTest.sysout("pressToggleFirebug; before forceOpen: " + forceOpen + ", is open: " + isOpen);
 
-    FBTest.sendKey("F12"); // F12
+    // Don't close if it's open and should stay open.
+    if (forceOpen && isOpen)
+    {
+        FBTest.sysout("pressToggleFirebug; bail out");
+        return;
+    }
+
+    FBTest.sendKey("F12", target); // F12
+
+    isOpen = this.isFirebugOpen();
+    FBTest.sysout("pressToggleFirebug; after forceOpen: " + forceOpen + ", is open: " + isOpen);
 };
 
 /**
@@ -521,9 +589,9 @@ this.shutdownFirebug = function()
  */
 this.isFirebugOpen = function()
 {
-    var collapsedFirebug = FW.Firebug.chrome.isOpen();
-    FBTest.sysout("isFirebugOpen collapsedFirebug " + collapsedFirebug);
-    return collapsedFirebug;
+    var isOpen = FW.Firebug.chrome.isOpen();
+    FBTest.sysout("isFirebugOpen; isOpen: " + isOpen);
+    return isOpen;
 };
 
 this.getFirebugPlacement = function()
@@ -561,6 +629,16 @@ this.setSidePanelWidth = function(width)
 this.isDetached = function()
 {
     return FW.Firebug.isDetached();
+};
+
+this.isMinimized = function()
+{
+    return FW.Firebug.isMinimized();
+};
+
+this.isInBrowser = function()
+{
+    return FW.Firebug.isInBrowser();
 };
 
 /**
@@ -720,12 +798,12 @@ function waitForWindowLoad(browser, callback)
     // (bug549539) could be utilized.
     function waitForEvents(event)
     {
-        if (event.type == "load")
+        if (event.type == "load" && event.target === browser.contentDocument)
         {
             browser.removeEventListener("load", waitForEvents, true);
             loaded = true;
         }
-        else if (event.type == "MozAfterPaint")
+        else if (event.type == "MozAfterPaint" && event.target === browser.contentWindow)
         {
             browser.removeEventListener("MozAfterPaint", waitForEvents, true);
             painted = true;
@@ -851,7 +929,10 @@ this.setPanelState = function(model, panelName, callbackTriggersReload, enable)
         }
 
         if (!panelTab)
+        {
+            this.ok(panelTab, "Such panel doesn't exist! " + panelName + ", " + enable);
             return;
+        }
 
         // Execute directly menu commands.
         if (enable)
@@ -912,7 +993,7 @@ this.disableConsolePanel = function(callback)
 };
 
 /**
- * Enables the Script panel and reloads if a callback is specified.
+ * Enables the Console panel and reloads if a callback is specified.
  * @param {Function} callback A handler that is called as soon as the page is reloaded.
  */
 this.enableConsolePanel = function(callback)
@@ -925,7 +1006,7 @@ this.enableConsolePanel = function(callback)
  */
 this.disableAllPanels = function()
 {
-    FW.FBL.$("cmd_disablePanels").doCommand();
+    FW.FBL.$("cmd_firebug_disablePanels").doCommand();
 };
 
 /**
@@ -933,7 +1014,7 @@ this.disableAllPanels = function()
  */
 this.enableAllPanels = function()
 {
-    FW.FBL.$("cmd_enablePanels").doCommand();
+    FW.FBL.$("cmd_firebug_enablePanels").doCommand();
 };
 
 /**
@@ -1109,9 +1190,12 @@ this.OneShotHandler = function(eventTarget, eventName, onEvent, capturing)
  * Notice that FBTest automatically resets all preferences before every single test is executed.
  * @param {Object} value New value of the preference.
  */
-this.setPref = function(pref, value)
+this.setPref = function(pref, value, prefDomain)
 {
-    FW.Firebug.setPref(FW.Firebug.prefDomain, pref, value);
+    if (!prefDomain)
+        prefDomain = FW.Firebug.prefDomain;
+
+    FW.Firebug.setPref(prefDomain, pref, value);
 };
 
 /**
@@ -1128,9 +1212,22 @@ this.getPref = function(pref)
 // ********************************************************************************************* //
 // Command Line
 
+function getCommandLine(useCommandEditor)
+{
+    return useCommandEditor ?
+        FW.Firebug.CommandEditor :
+        FW.Firebug.CommandLine.getSingleRowCommandLine();
+}
+
+/**
+ * executes an expression inside the Command Line
+ * @param {String} the command to execute
+ * @param {Object} the Firebug.chrome object
+ * @param {Boolean} if set to true, type in the CommandEditor, or in the CommandLine otherwise
+ */
 this.executeCommand = function(expr, chrome, useCommandEditor)
 {
-    this.clearAndTypeCommand(expr, useCommandEditor);
+    FBTest.clearAndTypeCommand(expr, useCommandEditor);
 
     if (useCommandEditor)
         FBTest.clickToolbarButton(chrome, "fbCmdLineRunButton");
@@ -1138,39 +1235,51 @@ this.executeCommand = function(expr, chrome, useCommandEditor)
         FBTest.sendKey("RETURN", "fbCommandLine");
 };
 
-this.clearCommand = function(useCommandEditor)
+/**
+ * clears the Command Line or the Command Editor
+ */
+this.clearCommand = function()
 {
-    var doc = FW.Firebug.chrome.window.document;
-    var cmdLine = doc.getElementById(useCommandEditor ? "fbCommandEditor": "fbCommandLine");
-    cmdLine.value = "";
+    FW.Firebug.CommandLine.clear(FW.Firebug.currentContext);
 };
 
+
+/**
+ * clears and types a command into the Command Line or the Command Editor 
+ * @param {String} the command to type
+ * @param {Boolean} if set to true, type in the CommandEditor, or in the CommandLine otherwise
+ * 
+ */
 this.clearAndTypeCommand = function(string, useCommandEditor)
 {
-    FBTest.clearCommand(useCommandEditor);
+    FBTest.clearCommand();
     FBTest.typeCommand(string, useCommandEditor);
 };
 
+/**
+ * types a command into the Command Line or the Command Editor 
+ * @param {String} the command to type
+ * @param {Boolean} if set to true, type in the CommandEditor, or in the CommandLine otherwise
+ * 
+ */
 this.typeCommand = function(string, useCommandEditor)
 {
     var doc = FW.Firebug.chrome.window.document;
-    var cmdLine = doc.getElementById(useCommandEditor ? "fbCommandEditor": "fbCommandLine");
     var panelBar1 = doc.getElementById("fbPanelBar1");
+    var cmdLine = getCommandLine(useCommandEditor);
     var win = panelBar1.browser.contentWindow;
 
-    if (useCommandEditor)
-        FBTest.setPref("largeCommandLine", useCommandEditor);
+    FBTest.setPref("commandEditor", (useCommandEditor == true));
 
     FW.Firebug.chrome.window.focus();
     panelBar1.browser.contentWindow.focus();
-    FBTest.focus(cmdLine);
+    cmdLine.focus();
 
     FBTest.sysout("typing "+string+" in to "+cmdLine+" focused on "+
         FW.FBL.getElementCSSSelector(doc.commandDispatcher.focusedElement)+
         " win "+panelBar1.browser.contentWindow);
 
-    for (var i=0; i<string.length; ++i)
-        FBTest.synthesizeKey(string.charAt(i), null, win);
+    this.sendString(string, doc.commandDispatcher.focusedElement);
 };
 
 /**
@@ -1180,18 +1289,20 @@ this.typeCommand = function(string, useCommandEditor)
  * @param {String} expected Expected value displayed.
  * @param {String} tagName Name of the displayed element.
  * @param {String} class Class of the displayed element.
+ * @param {Boolean} if set to false, does not clear the console logs
  */
-this.executeCommandAndVerify = function(callback, expression, expected, tagName, classes)
+this.executeCommandAndVerify = function(callback, expression, expected, tagName, classes, clear)
 {
-    FBTest.clearConsole();
+    if (clear !== false)
+        FBTest.clearConsole();
 
     var config = {tagName: tagName, classes: classes};
     FBTest.waitForDisplayedElement("console", config, function(row)
     {
         FBTest.compare(expected, row.textContent, "Verify: " +
             expression + " SHOULD BE " + expected);
-
-        FBTest.clearConsole();
+        if (clear !== false)
+            FBTest.clearConsole();
 
         if (callback)
             callback();
@@ -1200,6 +1311,16 @@ this.executeCommandAndVerify = function(callback, expression, expected, tagName,
     FBTest.progress("Execute expression: " + expression);
     FBTest.executeCommand(expression);
 };
+
+/**
+ * Simulate selection in the Command Editor or the Command Line
+ * @param {Integer} the index of the start of the selection
+ * @param {Integer} the index of the end of the selection
+ */
+/*this.setCommandSelectionRange = function(selectionStart, selectionEnd)
+{
+    FW.Firebug.CommandLine.getCommandLine().setSelectionRange(selectionStart, selectionEnd);
+}*/
 
 // ********************************************************************************************* //
 // Toolbar buttons
@@ -1392,7 +1513,9 @@ this.waitForBreakInDebugger = function(chrome, lineNo, breakpoint, callback)
         var panel = chrome.getSelectedPanel();
         if (panel)
         {
-            onPanelReady(sourceRow);
+            setTimeout(function() {
+                onPanelReady(sourceRow);
+            }, 200);
             return;
         }
 
@@ -1447,9 +1570,6 @@ this.waitForDebuggerResume = function(callback)
 {
     var timeout = 250;
     var counter = 20;
-    // FIXME xxxpedro variable never used
-    var self = this;
-
     var chrome = FW.Firebug.chrome;
 
     function checkResumeState()
@@ -1463,7 +1583,7 @@ this.waitForDebuggerResume = function(callback)
             setTimeout(checkResumeState, timeout);
     }
 
-    // Start checking clipboard on timeout.
+    // Start checking state on timeout.
     setTimeout(checkResumeState, timeout);
 };
 
@@ -1820,6 +1940,10 @@ this.expandElements = function(panelNode, className) // className, className, ..
  * Executes passed callback as soon as an expected element is displayed within the
  * specified panel. A DOM node representing the UI is passed into the callback as
  * the only parameter.
+ * 
+ * If 'config.onlyMutations' is set to true, the method is always waiting for changes
+ * and ignoring the fact that the nodes might be already displayed.
+ * 
  * @param {String} panelName Name of the panel that shows the result.
  * @param {Object} config Requirements, which must be fulfilled to trigger the callback function
  *     (can include "tagName", "id", "classes", "counter" and "onlyMutations")
@@ -1854,8 +1978,8 @@ this.waitForDisplayedElement = function(panelName, config, callback)
 
     this.selectPanel(panelName);
 
-    // Expected elements can be already displayed. In such case just asynchronously
-    // execute the callback (with the last element passed in).
+    // If config.onlyMutations is not true, let's check the UI since the nodes we
+    // are waiting for might me already displayed.
     if (!config.onlyMutations)
     {
         var panelNode = this.getPanel(panelName).panelNode;
@@ -1874,8 +1998,12 @@ this.waitForDisplayedElement = function(panelName, config, callback)
         }
         else
         {
+            // Expected elements can be already displayed. In such case just asynchronously
+            // execute the callback (with the last element passed in).
+            // Execute the callback if there is equal or more matched elements in the UI as
+            // expected in the config.
             var nodes = panelNode.getElementsByClassName(config.classes);
-            if (nodes.length == config.counter)
+            if (nodes.length >= config.counter)
             {
                 setTimeout(function()
                 {
@@ -1908,7 +2036,8 @@ this.waitForDisplayedElement = function(panelName, config, callback)
             if (nodes.length < config.counter)
                 FBTest.waitForDisplayedElement(panelName, config, callback);
             else
-                callback(element);
+                // wwwFlorent: oddly, element != nodes[config.counter - 1]
+                callback(nodes[config.counter - 1]);
         };
     }
 
@@ -1963,6 +2092,11 @@ this.clearSearchField = function()
     // (using key events) to simulate incremental search.
     var searchBox = FW.Firebug.chrome.$("fbSearchBox");
     searchBox.value = "";
+}
+
+this.getSearchFieldText = function()
+{
+    return FW.Firebug.chrome.$("fbSearchBox").value;
 }
 
 /**
@@ -2068,12 +2202,12 @@ this.searchInHtmlPanel = function(searchText, callback)
     // The listener is automatically removed when the test window
     // is unloaded in case the seletion actually doesn't occur,
     // see FBTestSelection.js
-    SelectionController.addListener(function selectionListener()
+    FBTestApp.SelectionController.addListener(function selectionListener()
     {
         var sel = panel.document.defaultView.getSelection();
         if (sel && !sel.isCollapsed && sel.toString() == searchText)
         {
-            SelectionController.removeListener(arguments.callee);
+            FBTestApp.SelectionController.removeListener(arguments.callee);
             callback(sel);
         }
     });
@@ -2118,7 +2252,7 @@ this.waitForHtmlMutation = function(chrome, tagName, callback)
     // corresponding element.
     var mutated = new MutationRecognizer(view, tagName, attributes);
     mutated.matches = matches;
-    mutated.onRecognizeAsync(function onMutate(node)
+    mutated.onRecognize(function onMutate(node)
     {
         // Now wait till the HTML panel unhighlight the element (removes the mutate class)
         var unmutated = new MutationRecognizer(view, tagName, null, null, attributes);
@@ -2143,11 +2277,9 @@ this.selectElementInHtmlPanel = function(element, callback)
         var id = element;
         element = FW.Firebug.currentContext.window.document.getElementById(id);
 
-        // FIXME: xxxpedro place a more friendly warning after fixing all test cases
-        if (!element)
+        if (!FBTest.ok(element, "the element #"+id+" must exist in the document"))
         {
-            var loc = FW.Firebug.currentContext ? FW.FBL.getFileName(FW.Firebug.currentContext.window.location.href) : "NULL";
-            FBTrace.sysout("[" + id + " | " + loc + "] ???????????????????????????????????????????????????????????????????????????????????????");
+            return;
         }
     }
 
@@ -2192,21 +2324,25 @@ this.getSelectedNodeBox = function()
 // Context menu
 
 /**
- * Opens context menu for target element and executes specified command
+ * Opens context menu for target element and executes specified command.
+ * Context menu listener is registered through ContextMenuController object, which ensures
+ * that the listener is removed at the end of the test even in cases where the context menu
+ * is never opened and so, the listener not removed by the test itself.
+ * 
  * @param {Element} target Element, which's context menu should be opened
- * @param {String or Object} menuItemIdentifier ID or object holding the label of the menu item, that should be executed
+ * @param {String or Object} menuItemIdentifier ID or object holding the label of the
+ *      menu item, that should be executed
  * @param {Function} callback Function called as soon as the element is selected.
  */
 this.executeContextMenuCommand = function(target, menuItemIdentifier, callback)
 {
-    var contextMenu = FW.FBL.hasPrefix(target.ownerDocument.documentURI, "chrome://firebug/") ?
-        FW.FBL.$("fbContextMenu") : FW.Firebug.chrome.window.top.window.document.
-            getElementById("contentAreaContextMenu");
+    var contextMenu = ContextMenuController.getContextMenu(target);
 
     var self = this;
+
     function onPopupShown(event)
     {
-        contextMenu.removeEventListener("popupshown", onPopupShown, false);
+        ContextMenuController.removeListener(target, "popupshown", onPopupShown);
 
         // Fire the event handler asynchronously so items have a chance to be appended.
         setTimeout(function()
@@ -2220,21 +2356,38 @@ this.executeContextMenuCommand = function(target, menuItemIdentifier, callback)
             else if (menuItemIdentifier.label)
             {
                 var menuItemId = menuItemIdentifier.label;
-                var menuItems = contextMenu.children;
-                for each (menuItem in menuItems)
+                for (var item = contextMenu.firstChild; item; item = item.nextSibling)
                 {
-                    if (menuItem.label == menuItemId)
+                    if (item.label == menuItemId)
+                    {
+                        menuItem = item;
                         break;
+                    }
                 }
             }
 
-            self.ok(menuItem, "'" + menuItemId  + "' item must be available in the context menu.");
+            self.ok(menuItem, "'" + menuItemId + "' item must be available in the context menu.");
 
             // If the menu item isn't available close the context menu and bail out.
             if (!menuItem)
             {
                 contextMenu.hidePopup();
                 return;
+            }
+
+            var submenupopup = FW.FBL.getAncestorByTagName(menuItem, "menupopup");
+            // if the item appears in a sub-menu:
+            if (submenupopup && submenupopup.parentNode.tagName === "menu")
+            {
+                var isParentEnabled = submenupopup.parentNode.disabled === false;
+                self.ok(isParentEnabled, "the parent \""+submenupopup.parentNode.label+
+                    "\" of the sub-menu must be enabled");
+                if (!isParentEnabled)
+                {
+                    contextMenu.hidePopup();
+                    return;
+                }
+                submenupopup.showPopup();
             }
 
             // Click on specified menu item.
@@ -2247,16 +2400,17 @@ this.executeContextMenuCommand = function(target, menuItemIdentifier, callback)
             {
                 // Since the command is dispatched asynchronously,
                 // execute the callback using timeout.
+                // Especially Mac OS needs this.
                 setTimeout(function()
                 {
                     callback();
-                }, 10);
+                }, 250);
             }
         }, 10);
     }
 
     // Wait till the menu is displayed.
-    contextMenu.addEventListener("popupshown", onPopupShown, false);
+    ContextMenuController.addListener(target, "popupshown", onPopupShown);
 
     // Right click on the target element.
     var eventDetails = {type: "contextmenu", button: 2};
@@ -2288,7 +2442,7 @@ this.setClipboardText = function(text)
 
         var string = Cc["@mozilla.org/supports-string;1"].createInstance(Ci.nsISupportsString);
         string.data = text;
-        trans.setTransferData("text/unicode", string, text.length + 2);
+        trans.setTransferData("text/unicode", string, text.length * 2);
 
         clipboard.setData(trans, null, Ci.nsIClipboard.kGlobalClipboard);
     }
@@ -2541,7 +2695,7 @@ this.saveWindowImageToFile = function(win, width, height, destFile)
     var canvas = this.getCanvasFromWindow(win, width, height);
 
     // convert string filepath to an nsIFile
-    var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsILocalFile);
+    var file = Cc["@mozilla.org/file/local;1"].createInstance(Ci.nsIFile);
     file.initWithPath(destFile);
 
     // create a data url from the canvas and then create URIs of the source and targets
@@ -2663,6 +2817,43 @@ this.getDOMPropertyRow = function(chrome, propName)
 };
 
 // ********************************************************************************************* //
+// Tooltips
+
+this.showTooltip = function(target, callback)
+{
+    function onTooltipShowing(event)
+    {
+        TooltipController.removeListener(onTooltipShowing);
+
+        callback(event.target);
+    }
+
+    // Tooltip controller ensures clean up (listners removal) in cases
+    // when the tooltip is never shown and so, the listener not removed. 
+    TooltipController.addListener(onTooltipShowing);
+
+    var win = target.ownerDocument.defaultView;
+
+    try
+    {
+        disableNonTestMouseEvents(win, true);
+
+        this.synthesizeMouse(target, 2, 2, {type: "mouseover"});
+        this.synthesizeMouse(target, 4, 4, {type: "mousemove"});
+        this.synthesizeMouse(target, 6, 6, {type: "mousemove"});
+    }
+    catch (e)
+    {
+        if (FBTrace.DBG_ERRORS)
+            FBTrace.sysout("EXCEPTION " + e, e);
+    }
+    finally
+    {
+        disableNonTestMouseEvents(win, false);
+    }
+}
+
+// ********************************************************************************************* //
 // Module Loader
 
 this.getRequire = function()
@@ -2690,6 +2881,16 @@ this.isInspectorActive = function()
 {
     return FW.Firebug.Inspector.inspecting;
 };
+
+// ********************************************************************************************* //
+// OS
+
+this.isMac = function()
+{
+    var hiddenWindow = Cc["@mozilla.org/appshell/appShellService;1"]
+        .getService(Ci.nsIAppShellService).hiddenDOMWindow;
+    return (hiddenWindow.navigator.platform.indexOf("Mac") >= 0);
+}
 
 // ********************************************************************************************* //
 }).apply(FBTest);

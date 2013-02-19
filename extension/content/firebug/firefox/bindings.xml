@@ -189,11 +189,14 @@
                 // Make sure the panel is visible.
                 this.togglePanel(panelName, true);
 
+                // Optimization is done only if the panel really doesn't need to be refreshed.
                 if (panel && (panel == this.selectedPanel) && !forceUpdate)
                     return panel;
 
                 if (FBTrace.DBG_PANELS)
-                    FBTrace.sysout("selectPanel " + panelName + " panel: " + panel);
+                    FBTrace.sysout("selectPanel " + panelName + " panel: " + panel +
+                        ", forceUpdate: " + forceUpdate + ", noRefresh: " + noRefresh +
+                        ", needsUpdate: " + (panel ? panel.needsRefresh : ""));
 
                 this.hideSelectedPanel();
 
@@ -804,8 +807,9 @@
                 var panel = this.panelBar.selectedPanel;
                 if (!panel)
                     return;
-    
-                var panelItems = panel ? panel.getOptionsMenuItems(Firebug.currentContext) : null;
+
+                var panelItems = this.getOptionsMenuItems(panel);
+
                 if (!panel.activable && !(panelItems && panelItems.length))
                     this.setAttribute("collapsed", "true");
                 else
@@ -825,6 +829,23 @@
                     rtlLanguage ? "topright" : "topleft");
             ]]></body>
         </method>
+
+        <method name="getOptionsMenuItems">
+            <parameter name="panel"/>
+            <body><![CDATA[
+                if (!panel)
+                    return null;
+
+                // Get menu items from the current panel.
+                var context = Firebug.currentContext;
+                var items = panel.getOptionsMenuItems(context);
+
+                // Distribute to listeners so, other modules/extensions can extend the menu.
+                Firebug.dispatch(Firebug.uiListeners, "onOptionsMenu", [context, panel, items]);
+
+                return items;
+            ]]></body>
+        </method>
     </implementation>
 
     <handlers>
@@ -835,6 +856,10 @@
         ]]></handler>
 
         <handler event="popupshowing"><![CDATA[
+            // If the event comes from a sub-menu ignore it (just the root has "menuPopup" class)
+            if (!FBL.hasClass(event.originalTarget, "menuPopup"))
+                return;
+
             var tab = this.parentNode;
             if (!tab)
                 return false;
@@ -857,7 +882,7 @@
             if (panel)
             {
                 // Get panel's option items
-                var panelItems = panel.getOptionsMenuItems(Firebug.currentContext);
+                var panelItems = this.getOptionsMenuItems(panel);
                 if (panelItems && panelItems.length > 0)
                     items.push("-");
             }
@@ -873,6 +898,10 @@
         ]]></handler>
 
         <handler event="popuphidden"><![CDATA[
+            // If the event comes from a sub-menu ignore it (just the root has "menuPopup" class)
+            if (!FBL.hasClass(event.originalTarget, "menuPopup"))
+                return;
+
             this.setAttribute("role", "presentation");
             FBL.eraseNode(this.popup);
         ]]></handler>
@@ -1237,8 +1266,9 @@
 
                 for (var j = 0; j < urls.length; ++j)
                 {
+                    var label = urls[j].fileName != path ? urls[j].fileName : "Inline";
                     var menuInfo = {
-                        label: urls[j].fileName != path ? urls[j].fileName : "Inline",
+                        label: FBL.cropString(label, Firebug.Options.get("stringCropLength")),
                         tooltiptext: path + urls[j].fileName,
                         nol10n: true
                     };
@@ -1272,14 +1302,14 @@
             this.filter.filterString = "";
 
             this.onkeypress = FBL.bind(this.onKeyPress, this);
-            window.top.addEventListener("keypress", this.onkeypress, true);
+            window.parent.addEventListener("keypress", this.onkeypress, true);
 
             this.onclick = FBL.bind(this.onClick, this);
             this.popup.addEventListener("click", this.onclick, true);
         ]]></handler>
 
         <handler event="popuphidden"><![CDATA[
-            window.top.removeEventListener("keypress", this.onkeypress, true);
+            window.parent.removeEventListener("keypress", this.onkeypress, true);
             this.popup.removeEventListener("click", this.onclick, true);
 
             delete this.onkeypress;
@@ -1319,7 +1349,7 @@
                 {
                     if (child.localName == "menuitem")
                     {
-                        var label = child.getAttribute("label").toLowerCase();
+                        var label = child.getAttribute("tooltiptext").toLowerCase();
                         child._searchMatch = label.indexOf(substring) != -1;
                         if (child._searchMatch)
                         {

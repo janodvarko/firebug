@@ -38,6 +38,7 @@ const mimeExtensionMap =
     "png": "image/png",
     "bmp": "image/bmp",
     "swf": "application/x-shockwave-flash",
+    "xap": "application/x-silverlight-app",
     "flv": "video/x-flv",
     "webm": "video/webm"
 };
@@ -51,6 +52,8 @@ const mimeCategoryMap =
     "application/rss+xml": "html",
     "application/atom+xml": "html",
     "application/xhtml+xml": "html",
+    "application/mathml+xml": "html",
+    "application/rdf+xml": "html",
     "text/css": "css",
     "application/x-javascript": "js",
     "text/javascript": "js",
@@ -62,13 +65,16 @@ const mimeCategoryMap =
     "image/gif": "image",
     "image/png": "image",
     "image/bmp": "image",
-    "application/x-shockwave-flash": "flash",
-    "video/x-flv": "flash",
+    "application/x-shockwave-flash": "plugin",
+    "application/x-silverlight-app": "plugin",
+    "video/x-flv": "media",
     "audio/mpeg3": "media",
     "audio/x-mpeg-3": "media",
     "video/mpeg": "media",
     "video/x-mpeg": "media",
     "video/webm": "media",
+    "video/mp4": "media",
+    "video/ogg": "media",
     "audio/ogg": "media",
     "application/ogg": "media",
     "application/x-ogg": "media",
@@ -78,7 +84,15 @@ const mimeCategoryMap =
     "audio/x-midi": "media",
     "music/crescendo": "media",
     "audio/wav": "media",
-    "audio/x-wav": "media"
+    "audio/x-wav": "media",
+    "application/x-woff": "font",
+    "application/x-font-woff": "font",
+    "application/x-ttf": "font",
+    "application/x-font-ttf": "font",
+    "font/ttf": "font",
+    "font/woff": "font",
+    "application/x-otf": "font",
+    "application/x-font-otf": "font"
 };
 
 const fileCategories =
@@ -89,8 +103,9 @@ const fileCategories =
     "js": 1,
     "xhr": 1,
     "image": 1,
-    "flash": 1,
+    "plugin": 1,
     "media": 1,
+    "font": 1,
     "txt": 1,
     "bin": 1
 };
@@ -107,14 +122,15 @@ const textFileCategories =
 const binaryFileCategories =
 {
     "bin": 1,
-    "flash": 1,
+    "plugin": 1,
     "media": 1
 };
 
 const binaryCategoryMap =
 {
     "image": 1,
-    "flash" : 1
+    "plugin" : 1,
+    "font": 1
 };
 
 // ********************************************************************************************* //

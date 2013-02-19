@@ -44,6 +44,8 @@ const Cc = Components.classes;
 const Ci = Components.interfaces;
 const Cr = Components.results;
 
+const hiddenColsPref = "net.hiddenColumns";
+
 var panelName = "net";
 
 // ********************************************************************************************* //
@@ -179,11 +181,15 @@ Firebug.NetMonitor.NetRequestTable = domplate(Firebug.Rep, new Firebug.Listener(
             (direction == "asc" && header.sorted == -1))
             return;
 
+        var newDirection = ((header.sorted && header.sorted == 1) || (!header.sorted && direction == "asc")) ? "ascending" : "descending";
         if (header)
-            header.setAttribute("aria-sort", header.sorted === -1 ? "descending" : "ascending");
+            header.setAttribute("aria-sort", newDirection);
 
         var tbody = table.lastChild;
         var colID = header.getAttribute("id");
+
+        table.setAttribute("sortcolumn", colID);
+        table.setAttribute("sortdirection", newDirection);
 
         var values = [];
         for (var row = tbody.childNodes[1]; row; row = row.nextSibling)
@@ -219,7 +225,8 @@ Firebug.NetMonitor.NetRequestTable = domplate(Firebug.Rep, new Firebug.Listener(
             switch (colID)
             {
                 case "netTimeCol":
-                    value = row.repObject.startTime;
+                    FBTrace.sysout("row.repObject", row.repObject);
+                    value = row.repObject.requestNumber;
                     break;
                 case "netSizeCol":
                     value = row.repObject.size;
@@ -247,7 +254,7 @@ Firebug.NetMonitor.NetRequestTable = domplate(Firebug.Rep, new Firebug.Listener(
 
         values.sort(sortFunction);
 
-        if ((header.sorted && header.sorted == 1) || (!header.sorted && direction == "asc"))
+        if (newDirection == "ascending")
         {
             Css.removeClass(header, "sortedDescending");
             Css.setClass(header, "sortedAscending");
@@ -363,7 +370,7 @@ Firebug.NetMonitor.NetRequestTable = domplate(Firebug.Rep, new Firebug.Listener(
         }
 
         // Store current state into the preferences.
-        Options.set("net.hiddenColumns", table.getAttribute("hiddenCols"));
+        Options.set(hiddenColsPref, table.getAttribute("hiddenCols"));
 
         panel.updateHRefLabelWidth();
     },
@@ -383,8 +390,8 @@ Firebug.NetMonitor.NetRequestTable = domplate(Firebug.Rep, new Firebug.Listener(
         }
 
         // Reset visibility. Only the Status column is hidden by default.
-        panel.table.setAttribute("hiddenCols", "colStatus");
-        Options.set("net.hiddenColumns", "colStatus");
+        Options.clear(hiddenColsPref);
+        panel.table.setAttribute("hiddenCols", Options.get(hiddenColsPref));
     },
 });
 
@@ -484,14 +491,14 @@ Firebug.NetMonitor.NetRequestEntry = domplate(Firebug.Rep, new Firebug.Listener(
             TD({"class": "netCol netProtocolCol a11yFocus", "role" : "gridcell"}),
             TD({"class": "netCol netDomainCol a11yFocus", "role" : "gridcell"}),
             TD({"class": "netTotalSizeCol netCol netSizeCol a11yFocus", "role": "gridcell"},
-                DIV({"class": "netTotalSizeLabel netSummaryLabel"}, "0KB")
+                DIV({"class": "netTotalSizeLabel netSummaryLabel"}, "0 B")
             ),
             TD({"class": "netTotalTimeCol netCol netTimeCol a11yFocus", "role":
                 "gridcell", colspan: "3"},
                 DIV({"class": "netSummaryBar", style: "width: 100%"},
                     DIV({"class": "netCacheSizeLabel netSummaryLabel", collapsed: "true"},
                         "(",
-                        SPAN("0KB"),
+                        SPAN("0 B"),
                         SPAN(" " + Locale.$STR("FromCache")),
                         ")"
                     ),
@@ -634,13 +641,19 @@ Firebug.NetMonitor.NetRequestEntry = domplate(Firebug.Rep, new Firebug.Listener(
 
     getHref: function(file)
     {
-        return (file.method ? file.method.toUpperCase() : "?") + " " +
-            Str.cropString(Url.getFileName(file.href), 40);
+        var fileName = Url.getFileName(file.href);
+        var limit = Options.get("stringCropLength");
+        if (limit > 0)
+            fileName = Str.cropString(fileName, limit);
+        return (file.method ? file.method.toUpperCase() : "?") + " " + fileName;
     },
 
     getProtocol: function(file)
     {
-        return Url.getProtocol(file.href);
+        var protocol = Url.getProtocol(file.href);
+        var text = file.responseHeadersText;
+        var spdy = text ? text.search(/X-Firefox-Spdy/i) >= 0 : null;
+        return spdy ? protocol + " SPDY" : protocol;
     },
 
     getStatus: function(file)
@@ -653,7 +666,14 @@ Firebug.NetMonitor.NetRequestEntry = domplate(Firebug.Rep, new Firebug.Listener(
         if (file.responseStatusText)
             text += file.responseStatusText;
 
-        return text ? Str.cropString(text) : " ";
+        text = text ? Str.cropString(text) : " ";
+
+        if (file.fromAppCache)
+            text += " (AppCache)";
+        else if (file.fromBFCache)
+            text += " (BFCache)";
+
+        return text;
     },
 
     getDomain: function(file)
@@ -669,24 +689,12 @@ Firebug.NetMonitor.NetRequestEntry = domplate(Firebug.Rep, new Firebug.Listener(
 
     getLocalAddress: function(file)
     {
-        var address = file.localAddress ? file.localAddress : "";
-        var port = file.localPort ? file.localPort : "";
-
-        var result = address;
-        result += result ? ":" : "";
-        result += port;
-        return result;
+        return Str.formatIP(file.localAddress, file.localPort);
     },
 
     getRemoteAddress: function(file)
     {
-        var address = file.remoteAddress ? file.remoteAddress : "";
-        var port = file.remotePort ? file.remotePort : "";
-
-        var result = address;
-        result += result ? ":" : "";
-        result += port;
-        return result;
+        return Str.formatIP(file.remoteAddress, file.remotePort);
     },
 
     getElapsedTime: function(file)
@@ -859,6 +867,13 @@ Firebug.NetMonitor.NetInfoBody = domplate(Firebug.Rep, new Firebug.Listener(),
             )
         ),
 
+    responseHeadersFromBFCacheTag:
+        TR(
+            TD({"class": "headerFromBFCache"},
+                Locale.$STR("net.label.ResponseHeadersFromBFCache")
+            )
+        ),
+
     customTab:
         A({"class": "netInfo$tabId\\Tab netInfoTab", onclick: "$onClickTab",
             view: "$tabId", "role": "tab"},
@@ -966,9 +981,13 @@ Firebug.NetMonitor.NetInfoBody = domplate(Firebug.Rep, new Firebug.Listener(),
 
     selectTabByName: function(netInfoBox, tabName)
     {
-        var tab = Dom.getChildByClass(netInfoBox, "netInfoTabs", "netInfo"+tabName+"Tab");
-        if (tab)
-            this.selectTab(tab);
+        var tab = Dom.getChildByClass(netInfoBox, "netInfoTabs", "netInfo" + tabName + "Tab");
+        if (!tab)
+            return false;
+
+        this.selectTab(tab);
+
+        return true;
     },
 
     selectTab: function(tab)
@@ -1034,8 +1053,20 @@ Firebug.NetMonitor.NetInfoBody = domplate(Firebug.Rep, new Firebug.Listener(),
             if (file.responseHeaders && !netInfoBox.responseHeadersPresented)
             {
                 netInfoBox.responseHeadersPresented = true;
+
                 Firebug.NetMonitor.NetInfoHeaders.renderHeaders(headersText,
                     file.responseHeaders, "ResponseHeaders");
+
+                // If the request comes from the BFCache do not display reponse headers.
+                // There is not real response from the server and all headers come from
+                // the cache. So, the user should see the 'Response Headers From Cache'
+                // section (see issue 5573).
+                if (file.fromBFCache)
+                {
+                    // Display a message instead of headers.
+                    var body = Dom.getElementByClass(headersText, "netInfoResponseHeadersBody");
+                    Firebug.NetMonitor.NetInfoBody.responseHeadersFromBFCacheTag.replace({}, body);
+                }
             }
 
             if (file.cachedResponseHeaders && !netInfoBox.cachedResponseHeadersPresented)
@@ -1131,6 +1162,14 @@ Firebug.NetMonitor.NetInfoBody = domplate(Firebug.Rep, new Firebug.Listener(),
             this.htmlPreview = netInfoBox.getElementsByClassName("netInfoHtmlPreview").item(0);
             this.htmlPreview.contentWindow.document.body.innerHTML = text;
 
+            // Workaround for issue 5774 (it's not clear why the 'load' event is actually
+            // sent to the iframe when the user swithes Firebug panels).
+            // The event is sent only for the iframes in the Console panel.
+            context.addEventListener(this.htmlPreview, "load", function(event)
+            {
+                event.target.contentDocument.body.innerHTML = text;
+            });
+
             var defaultHeight = parseInt(Options.get("netHtmlPreviewHeight"));
             if (!isNaN(defaultHeight))
                 this.htmlPreview.style.height = defaultHeight + "px";
@@ -1194,8 +1233,7 @@ Firebug.NetMonitor.NetInfoBody = domplate(Firebug.Rep, new Firebug.Listener(),
             var object = {
                 text: Locale.$STR("net.responseSizeLimitMessage"),
                 onClickLink: function() {
-                    var panel = context.getPanel("net", true);
-                    panel.openResponseInTab(file);
+                    NetUtils.openResponseInTab(file);
                 }
             };
             Firebug.NetMonitor.ResponseSizeLimit.append(object, responseTextBox);
@@ -1393,6 +1431,7 @@ Firebug.NetMonitor.NetInfoPostData = domplate(Firebug.Rep, new Firebug.Listener(
 
         var contentType = NetUtils.findHeader(file.requestHeaders, "content-type");
 
+        // TODO: Trigger an event here instead and register the viewer models as listeners
         if (Firebug.JSONViewerModel.isJSON(contentType, text))
             this.insertJSON(parentNode, file, context);
 
@@ -1521,7 +1560,7 @@ Firebug.NetMonitor.NetInfoPostData = domplate(Firebug.Rep, new Firebug.Listener(
             postData.params.push({
                 name: (m && m.length > 1) ? m[1] : "",
                 value: Str.trim(part[1])
-            })
+            });
         }
 
         return postData;
@@ -1595,13 +1634,13 @@ Firebug.NetMonitor.NetInfoHeaders = domplate(Firebug.Rep, new Firebug.Listener()
         {
             var headers = requestHeaders ? file.requestHeaders : file.responseHeaders;
             this.insertHeaderRows(netInfoBox, headers, target.rowName);
-            target.innerHTML = Locale.$STR("net.headers.view source");
+            target.textContent = Locale.$STR("net.headers.view source");
         }
         else
         {
             var source = requestHeaders ? file.requestHeadersText : file.responseHeadersText;
-            this.insertSource(netInfoBox, source, target.rowName);
-            target.innerHTML = Locale.$STR("net.headers.pretty print");
+            this.insertSource(netInfoBox, Str.escapeForTextNode(source), target.rowName);
+            target.textContent = Locale.$STR("net.headers.pretty print");
         }
 
         target.sourceDisplayed = !target.sourceDisplayed;
@@ -1824,12 +1863,12 @@ Firebug.NetMonitor.TimeInfoTip = domplate(Firebug.Rep,
                 name: timeStamp.label,
                 classes: timeStamp.classes,
                 start: timeStamp.time - file.startTime
-            })
+            });
         }
 
         events.sort(function(a, b) {
             return a.start < b.start ? -1 : 1;
-        })
+        });
 
         var phases = context.netProgress.phases;
 
@@ -1919,7 +1958,7 @@ Firebug.NetMonitor.SizeInfoTip = domplate(Firebug.Rep,
 
     formatNumber: function(size)
     {
-        return size.size ? ("(" + Str.formatNumber(size.size) + ")") : "";
+        return size.size && size.size >= 1024 ? "(" + size.size.toLocaleString() + " B)" : "";
     },
 
     render: function(file, parentNode)
@@ -1945,7 +1984,7 @@ Firebug.NetMonitor.SizeInfoTip = domplate(Firebug.Rep,
         }
 
         this.tag.replace({sizeInfo: sizeInfo}, parentNode);
-    },
+    }
 });
 
 // ********************************************************************************************* //
@@ -2018,7 +2057,7 @@ Firebug.NetMonitor.NetLimit = domplate(Firebug.Rep,
         var row = this.limitTag.insertRows(limitInfo, parent, this)[0];
         row.limitInfo = limitInfo;
         return row;
-    },
+    }
 });
 
 // ********************************************************************************************* //

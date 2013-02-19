@@ -85,17 +85,19 @@ Breakpoint.prototype =
             // The properties of scope are all strings; we pass them in then
             // unpack them using 'with'. The function is called immediately.
             var expr = "(function (){var scope = " + JSON.stringify(scope) +
-                "; with (scope) { return  " + this.condition + ";}})();"
+                "; with (scope) { return  " + this.condition + ";}})();";
 
             // The callbacks will set this if the condition is true or if the eval faults.
             delete context.breakingCause;
 
-            var rc = Firebug.CommandLine.evaluate(expr, context, null, context.window,
+            Firebug.CommandLine.evaluate(expr, context, null, context.window,
                 this.onEvaluateSucceeds, this.onEvaluateFails );
 
             if (FBTrace.DBG_NET)
-                FBTrace.sysout("net.evaluateCondition; rc " + rc, {expr: expr,scope: scope,
+            {
+                FBTrace.sysout("net.evaluateCondition", {expr: expr, scope: scope,
                     json: JSON.stringify(scope)});
+            }
 
             return !!context.breakingCause;
         }
@@ -129,8 +131,8 @@ Breakpoint.prototype =
             prevValue: this.condition,
             newValue:result
         };
-    },
-}
+    }
+};
 
 // ********************************************************************************************* //
 // Breakpoint UI
@@ -141,11 +143,11 @@ var BreakpointRep = domplate(Firebug.Rep,
     inspectable: false,
 
     tag:
-        DIV({"class": "breakpointRow focusRow", _repObject: "$bp",
+        DIV({"class": "breakpointRow focusRow", $disabled: "$bp|isDisabled", _repObject: "$bp",
             role: "option", "aria-checked": "$bp.checked"},
-            DIV({"class": "breakpointBlockHead", onclick: "$onEnable"},
+            DIV({"class": "breakpointBlockHead"},
                 INPUT({"class": "breakpointCheckbox", type: "checkbox",
-                    _checked: "$bp.checked", tabindex : "-1"}),
+                    _checked: "$bp.checked", tabindex: "-1", onclick: "$onEnable"}),
                 SPAN({"class": "breakpointName", title: "$bp|getTitle"}, "$bp|getName"),
                 IMG({"class": "closeButton", src: "blank.gif", onclick: "$onRemove"})
             ),
@@ -162,6 +164,11 @@ var BreakpointRep = domplate(Firebug.Rep,
     getName: function(bp)
     {
         return Url.getFileName(bp.href);
+    },
+
+    isDisabled: function(bp)
+    {
+        return !bp.checked;
     },
 
     onRemove: function(event)
@@ -192,29 +199,34 @@ var BreakpointRep = domplate(Firebug.Rep,
                 file.row.removeAttribute("breakpoint");
                 file.row.removeAttribute("disabledBreakpoint");
             }
-        })
+        });
     },
 
     onEnable: function(event)
     {
         var checkBox = event.target;
-        if (!Css.hasClass(checkBox, "breakpointCheckbox"))
-            return;
+        var bpRow = Dom.getAncestorByClass(checkBox, "breakpointRow");
+
+        if (checkBox.checked)
+        {
+            Css.removeClass(bpRow, "disabled");
+            bpRow.setAttribute("aria-checked", "true");
+        }
+        else
+        {
+            Css.setClass(bpRow, "disabled");
+            bpRow.setAttribute("aria-checked", "false");
+        }
+
+        var bp = bpRow.repObject;
+        bp.checked = checkBox.checked;
 
         var bpPanel = Firebug.getElementPanel(event.target);
         var context = bpPanel.context;
 
-        var bp = Dom.getAncestorByClass(checkBox, "breakpointRow").repObject;
-        bp.checked = checkBox.checked;
-
         var panel = context.getPanel(panelName, true);
         if (!panel)
             return;
-
-        // xxxsz: Needs a better way to update display of breakpoint than invalidate
-        // the whole panel's display
-        // xxxHonza
-        panel.context.invalidatePanels("breakpoints");
 
         panel.enumerateRequests(function(file)
         {
@@ -227,7 +239,8 @@ var BreakpointRep = domplate(Firebug.Rep,
     {
         return object instanceof Breakpoint;
     }
-})};
+});
+};
 
 // ********************************************************************************************* //
 // Registration
